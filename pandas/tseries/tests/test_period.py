@@ -104,12 +104,12 @@ class TestPeriodProperties(tm.TestCase):
         import dateutil
         from pandas.tslib import maybe_get_tz
         p = Period('1/1/2005', freq='M').to_timestamp(tz=maybe_get_tz('dateutil/Europe/Brussels'))
-        self.assertEqual(p.tz, dateutil.tz.gettz('Europe/Brussels'))
+        self.assertEqual(p.tz, dateutil.zoneinfo.gettz('Europe/Brussels'))
 
     def test_timestamp_tz_arg_dateutil_from_string(self):
         import dateutil
         p = Period('1/1/2005', freq='M').to_timestamp(tz='dateutil/Europe/Brussels')
-        self.assertEqual(p.tz, dateutil.tz.gettz('Europe/Brussels'))
+        self.assertEqual(p.tz, dateutil.zoneinfo.gettz('Europe/Brussels'))
 
     def test_timestamp_nat_tz(self):
         t = Period('NaT', freq='M').to_timestamp()
@@ -226,14 +226,27 @@ class TestPeriodProperties(tm.TestCase):
 
         i1 = Period(date(2007, 1, 1), freq='M')
         i2 = Period(datetime(2007, 1, 1), freq='M')
+        i3 = Period(np.datetime64('2007-01-01'), freq='M')
+        i4 = Period(np.datetime64('2007-01-01 00:00:00Z'), freq='M')
+        i5 = Period(np.datetime64('2007-01-01 00:00:00.000Z'), freq='M')
         self.assertEqual(i1, i2)
+        self.assertEqual(i1, i3)
+        self.assertEqual(i1, i4)
+        self.assertEqual(i1, i5)
 
         i1 = Period('2007-01-01 09:00:00.001')
         expected = Period(datetime(2007, 1, 1, 9, 0, 0, 1000), freq='L')
         self.assertEqual(i1, expected)
 
+        expected = Period(np.datetime64('2007-01-01 09:00:00.001Z'), freq='L')
+        self.assertEqual(i1, expected)
+
         i1 = Period('2007-01-01 09:00:00.00101')
         expected = Period(datetime(2007, 1, 1, 9, 0, 0, 1010), freq='U')
+        self.assertEqual(i1, expected)
+
+        expected = Period(np.datetime64('2007-01-01 09:00:00.00101Z'),
+                          freq='U')
         self.assertEqual(i1, expected)
 
         self.assertRaises(ValueError, Period, ordinal=200701)
@@ -432,6 +445,8 @@ class TestPeriodProperties(tm.TestCase):
         assert_equal(w_date.month, 1)
         assert_equal(w_date.week, 1)
         assert_equal((w_date - 1).week, 52)
+        assert_equal(w_date.days_in_month, 31)
+        assert_equal(Period(freq='WK', year=2012, month=2, day=1).days_in_month, 29)
 
     def test_properties_daily(self):
         # Test properties on Periods with daily frequency.
@@ -443,6 +458,8 @@ class TestPeriodProperties(tm.TestCase):
         assert_equal(b_date.day, 1)
         assert_equal(b_date.weekday, 0)
         assert_equal(b_date.dayofyear, 1)
+        assert_equal(b_date.days_in_month, 31)
+        assert_equal(Period(freq='B', year=2012, month=2, day=1).days_in_month, 29)
         #
         d_date = Period(freq='D', year=2007, month=1, day=1)
         #
@@ -452,6 +469,9 @@ class TestPeriodProperties(tm.TestCase):
         assert_equal(d_date.day, 1)
         assert_equal(d_date.weekday, 0)
         assert_equal(d_date.dayofyear, 1)
+        assert_equal(d_date.days_in_month, 31)
+        assert_equal(Period(freq='D', year=2012, month=2,
+                            day=1).days_in_month, 29)
 
     def test_properties_hourly(self):
         # Test properties on Periods with hourly frequency.
@@ -464,6 +484,9 @@ class TestPeriodProperties(tm.TestCase):
         assert_equal(h_date.weekday, 0)
         assert_equal(h_date.dayofyear, 1)
         assert_equal(h_date.hour, 0)
+        assert_equal(h_date.days_in_month, 31)
+        assert_equal(Period(freq='H', year=2012, month=2, day=1,
+                            hour=0).days_in_month, 29)
         #
 
     def test_properties_minutely(self):
@@ -478,6 +501,9 @@ class TestPeriodProperties(tm.TestCase):
         assert_equal(t_date.dayofyear, 1)
         assert_equal(t_date.hour, 0)
         assert_equal(t_date.minute, 0)
+        assert_equal(t_date.days_in_month, 31)
+        assert_equal(Period(freq='D', year=2012, month=2, day=1, hour=0,
+                            minute=0).days_in_month, 29)
 
     def test_properties_secondly(self):
         # Test properties on Periods with secondly frequency.
@@ -493,13 +519,16 @@ class TestPeriodProperties(tm.TestCase):
         assert_equal(s_date.hour, 0)
         assert_equal(s_date.minute, 0)
         assert_equal(s_date.second, 0)
+        assert_equal(s_date.days_in_month, 31)
+        assert_equal(Period(freq='Min', year=2012, month=2, day=1, hour=0,
+                            minute=0, second=0).days_in_month, 29)
 
     def test_properties_nat(self):
         p_nat = Period('NaT', freq='M')
         t_nat = pd.Timestamp('NaT')
         # confirm Period('NaT') work identical with Timestamp('NaT')
         for f in ['year', 'month', 'day', 'hour', 'minute', 'second',
-                  'week', 'dayofyear', 'quarter']:
+                  'week', 'dayofyear', 'quarter', 'days_in_month']:
             self.assertTrue(np.isnan(getattr(p_nat, f)))
             self.assertTrue(np.isnan(getattr(t_nat, f)))
 
@@ -1352,7 +1381,9 @@ class TestPeriodIndex(tm.TestCase):
         assert_series_equal(exp, result)
 
         ts = ts[10:].append(ts[10:])
-        self.assertRaises(ValueError, ts.__getitem__, slice('2008', '2009'))
+        self.assertRaisesRegexp(
+            KeyError, "left slice bound for non-unique label: '2008'",
+            ts.__getitem__, slice('2008', '2009'))
 
     def test_getitem_datetime(self):
         rng = period_range(start='2012-01-01', periods=10, freq='W-MON')
@@ -1363,6 +1394,39 @@ class TestPeriodIndex(tm.TestCase):
 
         rs = ts[dt1:dt4]
         assert_series_equal(rs, ts)
+
+    def test_slice_with_negative_step(self):
+        ts = Series(np.arange(20),
+                    period_range('2014-01', periods=20, freq='M'))
+        SLC = pd.IndexSlice
+
+        def assert_slices_equivalent(l_slc, i_slc):
+            assert_series_equal(ts[l_slc], ts.iloc[i_slc])
+            assert_series_equal(ts.loc[l_slc], ts.iloc[i_slc])
+            assert_series_equal(ts.ix[l_slc], ts.iloc[i_slc])
+
+        assert_slices_equivalent(SLC[Period('2014-10')::-1], SLC[9::-1])
+        assert_slices_equivalent(SLC['2014-10'::-1], SLC[9::-1])
+
+        assert_slices_equivalent(SLC[:Period('2014-10'):-1], SLC[:8:-1])
+        assert_slices_equivalent(SLC[:'2014-10':-1], SLC[:8:-1])
+
+        assert_slices_equivalent(SLC['2015-02':'2014-10':-1], SLC[13:8:-1])
+        assert_slices_equivalent(SLC[Period('2015-02'):Period('2014-10'):-1], SLC[13:8:-1])
+        assert_slices_equivalent(SLC['2015-02':Period('2014-10'):-1], SLC[13:8:-1])
+        assert_slices_equivalent(SLC[Period('2015-02'):'2014-10':-1], SLC[13:8:-1])
+
+        assert_slices_equivalent(SLC['2014-10':'2015-02':-1], SLC[:0])
+
+    def test_slice_with_zero_step_raises(self):
+        ts = Series(np.arange(20),
+                    period_range('2014-01', periods=20, freq='M'))
+        self.assertRaisesRegexp(ValueError, 'slice step cannot be zero',
+                                lambda: ts[::0])
+        self.assertRaisesRegexp(ValueError, 'slice step cannot be zero',
+                                lambda: ts.loc[::0])
+        self.assertRaisesRegexp(ValueError, 'slice step cannot be zero',
+                                lambda: ts.ix[::0])
 
     def test_sub(self):
         rng = period_range('2007-01', periods=50)
@@ -1509,7 +1573,7 @@ class TestPeriodIndex(tm.TestCase):
 
         df = df.set_index(idx1)
         self.assertTrue(df.index.equals(idx1))
-        df = df.reindex(idx2)
+        df = df.set_index(idx2)
         self.assertTrue(df.index.equals(idx2))
 
     def test_nested_dict_frame_constructor(self):
@@ -2292,7 +2356,7 @@ class TestPeriodIndex(tm.TestCase):
     def _check_all_fields(self, periodindex):
         fields = ['year', 'month', 'day', 'hour', 'minute',
                   'second', 'weekofyear', 'week', 'dayofweek',
-                  'weekday', 'dayofyear', 'quarter', 'qyear']
+                  'weekday', 'dayofyear', 'quarter', 'qyear', 'days_in_month']
 
         periods = list(periodindex)
 
@@ -2464,6 +2528,13 @@ class TestPeriodIndex(tm.TestCase):
             expected = pd.Series([1, 9, 9, 4, 5, 9, 7], index=idx, dtype=np.float64)
             tm.assert_series_equal(result, expected)
 
+    def test_searchsorted(self):
+        pidx = pd.period_range('2014-01-01', periods=10, freq='D')
+        self.assertEqual(
+            pidx.searchsorted(pd.Period('2014-01-01', freq='D')), 0)
+        self.assertRaisesRegexp(
+            ValueError, 'Different period frequency: H',
+            lambda: pidx.searchsorted(pd.Period('2014-01-01', freq='H')))
 
 def _permute(obj):
     return obj.take(np.random.permutation(len(obj)))

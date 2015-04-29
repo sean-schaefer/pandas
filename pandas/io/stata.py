@@ -15,54 +15,151 @@ import sys
 import struct
 from dateutil.relativedelta import relativedelta
 from pandas.core.base import StringMixin
+from pandas.core.categorical import Categorical
 from pandas.core.frame import DataFrame
 from pandas.core.series import Series
-from pandas.core.categorical import Categorical
 import datetime
 from pandas import compat, to_timedelta, to_datetime, isnull, DatetimeIndex
 from pandas.compat import lrange, lmap, lzip, text_type, string_types, range, \
-    zip
+    zip, BytesIO
+from pandas.util.decorators import Appender
 import pandas.core.common as com
 from pandas.io.common import get_filepath_or_buffer
 from pandas.lib import max_len_string_array, infer_dtype
 from pandas.tslib import NaT, Timestamp
 
+_statafile_processing_params1 = """\
+convert_dates : boolean, defaults to True
+    Convert date variables to DataFrame time values
+convert_categoricals : boolean, defaults to True
+    Read value labels and convert columns to Categorical/Factor variables"""
+
+_encoding_params = """\
+encoding : string, None or encoding
+    Encoding used to parse the files. Note that Stata doesn't
+    support unicode. None defaults to iso-8859-1."""
+
+_statafile_processing_params2 = """\
+index : identifier of index column
+    identifier of column that should be used as index of the DataFrame
+convert_missing : boolean, defaults to False
+    Flag indicating whether to convert missing values to their Stata
+    representations.  If False, missing values are replaced with nans.
+    If True, columns containing missing values are returned with
+    object data types and missing values are represented by
+    StataMissingValue objects.
+preserve_dtypes : boolean, defaults to True
+    Preserve Stata datatypes. If False, numeric data are upcast to pandas
+    default types for foreign data (float64 or int64)
+columns : list or None
+    Columns to retain.  Columns will be returned in the given order.  None
+    returns all columns
+order_categoricals : boolean, defaults to True
+    Flag indicating whether converted categorical data are ordered."""
+
+_chunksize_params = """\
+chunksize : int, default None
+    Return StataReader object for iterations, returns chunks with
+    given number of lines"""
+
+_iterator_params = """\
+iterator : boolean, default False
+    Return StataReader object"""
+
+_read_stata_doc = """Read Stata file into DataFrame
+
+Parameters
+----------
+filepath_or_buffer : string or file-like object
+    Path to .dta file or object implementing a binary read() functions
+%s
+%s
+%s
+%s
+%s
+
+Returns
+-------
+DataFrame or StataReader
+
+Examples
+--------
+Read a Stata dta file:
+>> df = pandas.read_stata('filename.dta')
+
+Read a Stata dta file in 10,000 line chunks:
+>> itr = pandas.read_stata('filename.dta', chunksize=10000)
+>> for chunk in itr:
+>>     do_something(chunk)
+""" % (_statafile_processing_params1, _encoding_params,
+       _statafile_processing_params2, _chunksize_params,
+       _iterator_params)
+
+_data_method_doc = """Reads observations from Stata file, converting them into a dataframe
+
+This is a legacy method.  Use `read` in new code.
+
+Parameters
+----------
+%s
+%s
+
+Returns
+-------
+DataFrame
+""" % (_statafile_processing_params1, _statafile_processing_params2)
+
+
+_read_method_doc = """\
+Reads observations from Stata file, converting them into a dataframe
+
+Parameters
+----------
+nrows : int
+    Number of lines to read from data file, if None read whole file.
+%s
+%s
+
+Returns
+-------
+DataFrame
+""" % (_statafile_processing_params1, _statafile_processing_params2)
+
+
+_stata_reader_doc = """\
+Class for reading Stata dta files.
+
+Parameters
+----------
+path_or_buf : string or file-like object
+    Path to .dta file or object implementing a binary read() functions
+%s
+%s
+%s
+%s
+""" % (_statafile_processing_params1, _statafile_processing_params2,
+       _encoding_params, _chunksize_params)
+
+
+@Appender(_read_stata_doc)
 def read_stata(filepath_or_buffer, convert_dates=True,
                convert_categoricals=True, encoding=None, index=None,
-               convert_missing=False, preserve_dtypes=True, columns=None):
-    """
-    Read Stata file into DataFrame
+               convert_missing=False, preserve_dtypes=True, columns=None,
+               order_categoricals=True, chunksize=None, iterator=False):
 
-    Parameters
-    ----------
-    filepath_or_buffer : string or file-like object
-        Path to .dta file or object implementing a binary read() functions
-    convert_dates : boolean, defaults to True
-        Convert date variables to DataFrame time values
-    convert_categoricals : boolean, defaults to True
-        Read value labels and convert columns to Categorical/Factor variables
-    encoding : string, None or encoding
-        Encoding used to parse the files. Note that Stata doesn't
-        support unicode. None defaults to cp1252.
-    index : identifier of index column
-        identifier of column that should be used as index of the DataFrame
-    convert_missing : boolean, defaults to False
-        Flag indicating whether to convert missing values to their Stata
-        representations.  If False, missing values are replaced with nans.
-        If True, columns containing missing values are returned with
-        object data types and missing values are represented by
-        StataMissingValue objects.
-    preserve_dtypes : boolean, defaults to True
-        Preserve Stata datatypes. If False, numeric data are upcast to pandas
-        default types for foreign data (float64 or int64)
-    columns : list or None
-        Columns to retain.  Columns will be returned in the given order.  None
-        returns all columns
-    """
-    reader = StataReader(filepath_or_buffer, encoding)
+    reader = StataReader(filepath_or_buffer,
+                         convert_dates=convert_dates,
+                         convert_categoricals=convert_categoricals,
+                         index=index, convert_missing=convert_missing,
+                         preserve_dtypes=preserve_dtypes,
+                         columns=columns,
+                         order_categoricals=order_categoricals,
+                         chunksize=chunksize, encoding=encoding)
 
-    return reader.data(convert_dates, convert_categoricals, index,
-                       convert_missing, preserve_dtypes, columns)
+    if iterator or chunksize:
+        return reader
+
+    return reader.read()
 
 _date_formats = ["%tc", "%tC", "%td", "%d", "%tw", "%tm", "%tq", "%th", "%ty"]
 
@@ -135,8 +232,10 @@ def _stata_elapsed_date_to_datetime_vec(dates, fmt):
         if year.max() < MAX_YEAR and year.min() > MIN_YEAR:
             return to_datetime(100 * year + month, format='%Y%m')
         else:
+            index = getattr(year, 'index', None)
             return Series(
-                [datetime.datetime(y, m, 1) for y, m in zip(year, month)])
+                [datetime.datetime(y, m, 1) for y, m in zip(year, month)],
+                index=index)
 
     def convert_year_days_safe(year, days):
         """
@@ -146,9 +245,10 @@ def _stata_elapsed_date_to_datetime_vec(dates, fmt):
         if year.max() < (MAX_YEAR - 1) and year.min() > MIN_YEAR:
             return to_datetime(year, format='%Y') + to_timedelta(days, unit='d')
         else:
+            index = getattr(year, 'index', None)
             value = [datetime.datetime(y, 1, 1) + relativedelta(days=int(d)) for
                      y, d in zip(year, days)]
-            return Series(value)
+            return Series(value, index=index)
 
     def convert_delta_safe(base, deltas, unit):
         """
@@ -156,18 +256,18 @@ def _stata_elapsed_date_to_datetime_vec(dates, fmt):
         versions if the deltas satisfy restrictions required to be expressed
         as dates in pandas.
         """
+        index = getattr(deltas, 'index', None)
         if unit == 'd':
             if deltas.max() > MAX_DAY_DELTA or deltas.min() < MIN_DAY_DELTA:
                 values = [base + relativedelta(days=int(d)) for d in deltas]
-                return Series(values)
+                return Series(values, index=index)
         elif unit == 'ms':
             if deltas.max() > MAX_MS_DELTA or deltas.min() < MIN_MS_DELTA:
                 values = [base + relativedelta(microseconds=(int(d) * 1000)) for
                           d in deltas]
-                return Series(values)
+                return Series(values, index=index)
         else:
             raise ValueError('format not understood')
-
         base = to_datetime(base)
         deltas = to_timedelta(deltas, unit=unit)
         return base + deltas
@@ -222,6 +322,7 @@ def _stata_elapsed_date_to_datetime_vec(dates, fmt):
 
     if has_bad_values:  # Restore NaT for bad values
         conv_dates[bad_locs] = NaT
+
     return conv_dates
 
 
@@ -336,6 +437,15 @@ Column converted from %s to %s, and some data are outside of the lossless
 conversion range. This may result in a loss of precision in the saved data.
 """
 
+class ValueLabelTypeMismatch(Warning):
+    pass
+
+value_label_mismatch_doc = """
+Stata value labels (pandas categories) must be strings. Column {0} contains
+non-string labels which will be converted to strings.  Please check that the
+Stata data file created has not lost information due to duplicate labels.
+"""
+
 
 class InvalidColumnName(Warning):
     pass
@@ -425,6 +535,131 @@ def _cast_to_stata_types(data):
     return data
 
 
+class StataValueLabel(object):
+    """
+    Parse a categorical column and prepare formatted output
+
+    Parameters
+    -----------
+    value : int8, int16, int32, float32 or float64
+        The Stata missing value code
+
+    Attributes
+    ----------
+    string : string
+        String representation of the Stata missing value
+    value : int8, int16, int32, float32 or float64
+        The original encoded missing value
+
+    Methods
+    -------
+    generate_value_label
+
+    """
+
+    def __init__(self, catarray):
+
+        self.labname = catarray.name
+
+        categories = catarray.cat.categories
+        self.value_labels = list(zip(np.arange(len(categories)), categories))
+        self.value_labels.sort(key=lambda x: x[0])
+        self.text_len = np.int32(0)
+        self.off = []
+        self.val = []
+        self.txt = []
+        self.n = 0
+
+        # Compute lengths and setup lists of offsets and labels
+        for vl in self.value_labels:
+            category = vl[1]
+            if not isinstance(category, string_types):
+                category = str(category)
+                import warnings
+                warnings.warn(value_label_mismatch_doc.format(catarray.name),
+                              ValueLabelTypeMismatch)
+
+            self.off.append(self.text_len)
+            self.text_len += len(category) + 1  # +1 for the padding
+            self.val.append(vl[0])
+            self.txt.append(category)
+            self.n += 1
+
+        if self.text_len > 32000:
+            raise ValueError('Stata value labels for a single variable must '
+                             'have a combined length less than 32,000 '
+                             'characters.')
+
+        # Ensure int32
+        self.off = np.array(self.off, dtype=np.int32)
+        self.val = np.array(self.val, dtype=np.int32)
+
+        # Total length
+        self.len = 4 + 4 + 4 * self.n + 4 * self.n + self.text_len
+
+    def _encode(self, s):
+        """
+        Python 3 compatability shim
+        """
+        if compat.PY3:
+            return s.encode(self._encoding)
+        else:
+            return s
+
+    def generate_value_label(self, byteorder, encoding):
+        """
+        Parameters
+        ----------
+        byteorder : str
+            Byte order of the output
+        encoding : str
+            File encoding
+
+        Returns
+        -------
+        value_label : bytes
+            Bytes containing the formatted value label
+        """
+
+        self._encoding = encoding
+        bio = BytesIO()
+        null_string = '\x00'
+        null_byte = b'\x00'
+
+        # len
+        bio.write(struct.pack(byteorder + 'i', self.len))
+
+        # labname
+        labname = self._encode(_pad_bytes(self.labname[:32], 33))
+        bio.write(labname)
+
+        # padding - 3 bytes
+        for i in range(3):
+            bio.write(struct.pack('c', null_byte))
+
+        # value_label_table
+        # n - int32
+        bio.write(struct.pack(byteorder + 'i', self.n))
+
+        # textlen  - int32
+        bio.write(struct.pack(byteorder + 'i', self.text_len))
+
+        # off - int32 array (n elements)
+        for offset in self.off:
+            bio.write(struct.pack(byteorder + 'i', offset))
+
+        # val - int32 array (n elements)
+        for value in self.val:
+            bio.write(struct.pack(byteorder + 'i', value))
+
+        # txt - Text labels, null terminated
+        for text in self.txt:
+            bio.write(self._encode(text + null_string))
+
+        bio.seek(0)
+        return bio.read()
+
+
 class StataMissingValue(StringMixin):
     """
     An observation's missing value.
@@ -473,32 +708,41 @@ class StataMissingValue(StringMixin):
     MISSING_VALUES = {}
     bases = (101, 32741, 2147483621)
     for b in bases:
-        MISSING_VALUES[b] = '.'
+        # Conversion to long to avoid hash issues on 32 bit platforms #8968
+        MISSING_VALUES[compat.long(b)] = '.'
         for i in range(1, 27):
-            MISSING_VALUES[i + b] = '.' + chr(96 + i)
+            MISSING_VALUES[compat.long(i + b)] = '.' + chr(96 + i)
 
-    base = b'\x00\x00\x00\x7f'
+    float32_base = b'\x00\x00\x00\x7f'
     increment = struct.unpack('<i', b'\x00\x08\x00\x00')[0]
     for i in range(27):
-        value = struct.unpack('<f', base)[0]
+        value = struct.unpack('<f', float32_base)[0]
         MISSING_VALUES[value] = '.'
         if i > 0:
             MISSING_VALUES[value] += chr(96 + i)
         int_value = struct.unpack('<i', struct.pack('<f', value))[0] + increment
-        base = struct.pack('<i', int_value)
+        float32_base = struct.pack('<i', int_value)
 
-    base = b'\x00\x00\x00\x00\x00\x00\xe0\x7f'
+    float64_base = b'\x00\x00\x00\x00\x00\x00\xe0\x7f'
     increment = struct.unpack('q', b'\x00\x00\x00\x00\x00\x01\x00\x00')[0]
     for i in range(27):
-        value = struct.unpack('<d', base)[0]
+        value = struct.unpack('<d', float64_base)[0]
         MISSING_VALUES[value] = '.'
         if i > 0:
             MISSING_VALUES[value] += chr(96 + i)
         int_value = struct.unpack('q', struct.pack('<d', value))[0] + increment
-        base = struct.pack('q', int_value)
+        float64_base = struct.pack('q', int_value)
+
+    BASE_MISSING_VALUES = {'int8': 101,
+                           'int16': 32741,
+                           'int32': 2147483621,
+                           'float32': struct.unpack('<f', float32_base)[0],
+                           'float64': struct.unpack('<d', float64_base)[0]}
 
     def __init__(self, value):
         self._value = value
+        # Conversion to long to avoid hash issues on 32 bit platforms #8968
+        value = compat.long(value) if value < 2147483648 else float(value)
         self._str = self.MISSING_VALUES[value]
 
     string = property(lambda self: self._str,
@@ -518,9 +762,25 @@ class StataMissingValue(StringMixin):
         return (isinstance(other, self.__class__)
                 and self.string == other.string and self.value == other.value)
 
+    @classmethod
+    def get_base_missing_value(cls, dtype):
+        if dtype == np.int8:
+            value = cls.BASE_MISSING_VALUES['int8']
+        elif dtype == np.int16:
+            value = cls.BASE_MISSING_VALUES['int16']
+        elif dtype == np.int32:
+            value = cls.BASE_MISSING_VALUES['int32']
+        elif dtype == np.float32:
+            value = cls.BASE_MISSING_VALUES['float32']
+        elif dtype == np.float64:
+            value = cls.BASE_MISSING_VALUES['float64']
+        else:
+            raise ValueError('Unsupported dtype')
+        return value
+
 
 class StataParser(object):
-    _default_encoding = 'cp1252'
+    _default_encoding = 'iso-8859-1'
 
     def __init__(self, encoding):
         self._encoding = encoding
@@ -554,7 +814,7 @@ class StataParser(object):
         self.DTYPE_MAP_XML = \
             dict(
                 [
-                    (32768, np.string_),
+                    (32768, np.uint8),  # Keys to GSO
                     (65526, np.float64),
                     (65527, np.float32),
                     (65528, np.int32),
@@ -566,6 +826,7 @@ class StataParser(object):
         self.TYPE_MAP_XML = \
             dict(
                 [
+                    (32768, 'L'),
                     (65526, 'd'),
                     (65527, 'f'),
                     (65528, 'l'),
@@ -613,7 +874,8 @@ class StataParser(object):
                 'h': 'i2',
                 'l': 'i4',
                 'f': 'f4',
-                'd': 'f8'
+                'd': 'f8',
+                'L': 'u8'
         }
 
         # Reserved words cannot be used as variable names
@@ -634,42 +896,40 @@ class StataParser(object):
         else:
             return str
 
-
 class StataReader(StataParser):
-    """
-    Class for working with a Stata dataset. There are two possibilities for
-    usage:
+    __doc__ = _stata_reader_doc
 
-     * The from_dta() method on the DataFrame class.
-       This will return a DataFrame with the Stata dataset. Note that when
-       using the from_dta() method, you will not have access to
-       meta-information like variable labels or the data label.
-
-     * Work with this object directly. Upon instantiation, the header of the
-       Stata data file is read, giving you access to attributes like
-       variable_labels(), data_label(), nobs(), ... A DataFrame with the data
-       is returned by the read() method; this will also fill up the
-       value_labels. Note that calling the value_labels() method will result in
-       an error if the read() method has not been called yet. This is because
-       the value labels are stored at the end of a Stata dataset, after the
-       data.
-
-    Parameters
-    ----------
-    path_or_buf : string or file-like object
-        Path to .dta file or object implementing a binary read() functions
-    encoding : string, None or encoding
-        Encoding used to parse the files. Note that Stata doesn't
-        support unicode. None defaults to cp1252.
-    """
-
-    def __init__(self, path_or_buf, encoding='cp1252'):
+    def __init__(self, path_or_buf, convert_dates=True,
+                 convert_categoricals=True, index=None,
+                 convert_missing=False, preserve_dtypes=True,
+                 columns=None, order_categoricals=True,
+                 encoding='iso-8859-1', chunksize=None):
         super(StataReader, self).__init__(encoding)
         self.col_sizes = ()
+
+        # Arguments to the reader (can be temporarily overridden in
+        # calls to read).
+        self._convert_dates = convert_dates
+        self._convert_categoricals = convert_categoricals
+        self._index = index
+        self._convert_missing = convert_missing
+        self._preserve_dtypes = preserve_dtypes
+        self._columns = columns
+        self._order_categoricals = order_categoricals
+        self._encoding = encoding
+        self._chunksize = chunksize
+
+        # State variables for the file
         self._has_string_data = False
         self._missing_values = False
-        self._data_read = False
+        self._can_read_value_labels = False
+        self._column_selector_set = False
         self._value_labels_read = False
+        self._data_read = False
+        self._dtype = None
+        self._lines_read = 0
+
+        self._native_byteorder =  _set_endianness(sys.byteorder)
         if isinstance(path_or_buf, str):
             path_or_buf, encoding = get_filepath_or_buffer(
                 path_or_buf, encoding=self._default_encoding
@@ -678,7 +938,13 @@ class StataReader(StataParser):
         if isinstance(path_or_buf, (str, compat.text_type, bytes)):
             self.path_or_buf = open(path_or_buf, 'rb')
         else:
-            self.path_or_buf = path_or_buf
+            # Copy to BytesIO, and ensure no encoding
+            contents = path_or_buf.read()
+            try:
+                contents = contents.encode(self._default_encoding)
+            except:
+                pass
+            self.path_or_buf = BytesIO(contents)
 
         self._read_header()
 
@@ -747,8 +1013,8 @@ class StataReader(StataParser):
                 for typ in typlist:
                     if typ <= 2045:
                         self.typlist[i] = typ
-                    elif typ == 32768:
-                        raise ValueError("Long strings are not supported")
+                    #elif typ == 32768:
+                    #    raise ValueError("Long strings are not supported")
                     else:
                         self.typlist[i] = self.TYPE_MAP_XML[typ]
                     i += 1
@@ -890,8 +1156,12 @@ class StataReader(StataParser):
         self.has_string_data = len([x for x in self.typlist
                                     if type(x) is int]) > 0
 
-        """Calculate size of a data record."""
+        # calculate size of a data record
         self.col_sizes = lmap(lambda x: self._calcsize(x), self.typlist)
+
+        # remove format details from %td
+        self.fmtlist = ["%td" if x.startswith("%td") else x for x in self.fmtlist]
+
 
     def _calcsize(self, fmt):
         return (type(fmt) is int and fmt
@@ -900,11 +1170,7 @@ class StataReader(StataParser):
     def _null_terminate(self, s):
         if compat.PY3 or self._encoding is not None:  # have bytes not strings,
                                                       # so must decode
-            null_byte = b"\0"
-            try:
-                s = s[:s.index(null_byte)]
-            except:
-                pass
+            s = s.partition(b"\0")[0]
             return s.decode(self._encoding or self._default_encoding)
         else:
             null_byte = "\0"
@@ -914,30 +1180,30 @@ class StataReader(StataParser):
                 return s
 
     def _read_value_labels(self):
-        if self.format_version >= 117:
-            self.path_or_buf.seek(self.seek_value_labels)
-        else:
-            if not self._data_read:
-                raise Exception("Data has not been read. Because of the "
-                                "layout of Stata files, this is necessary "
-                                "before reading value labels.")
-            if self._value_labels_read:
-                raise Exception("Value labels have already been read.")
-
-        self.value_label_dict = dict()
-
         if self.format_version <= 108:
             # Value labels are not supported in version 108 and earlier.
             return
+        if self._value_labels_read:
+            # Don't read twice
+            return
+
+        if self.format_version >= 117:
+            self.path_or_buf.seek(self.seek_value_labels)
+        else:
+            offset = self.nobs * self._dtype.itemsize
+            self.path_or_buf.seek(self.data_location + offset)
+
+        self._value_labels_read = True
+        self.value_label_dict = dict()
 
         while True:
             if self.format_version >= 117:
                 if self.path_or_buf.read(5) == b'</val':  # <lbl>
-                    break  # end o f variable lable table
+                    break  # end of variable label table
 
             slength = self.path_or_buf.read(4)
             if not slength:
-                break  # end of variable lable table (format < 117)
+                break  # end of variable label table (format < 117)
             labname = self._null_terminate(self.path_or_buf.read(33))
             self.path_or_buf.read(3)  # padding
 
@@ -971,66 +1237,126 @@ class StataReader(StataParser):
             if self.path_or_buf.read(3) != b'GSO':
                 break
 
-            v_o = struct.unpack(self.byteorder + 'L',
-                                self.path_or_buf.read(8))[0]
-            typ = self.path_or_buf.read(1)
+            v_o = struct.unpack(self.byteorder + 'Q', self.path_or_buf.read(8))[0]
+            typ = struct.unpack('B', self.path_or_buf.read(1))[0]
             length = struct.unpack(self.byteorder + 'I',
                                    self.path_or_buf.read(4))[0]
-            self.GSO[v_o] = self.path_or_buf.read(length-1)
-            self.path_or_buf.read(1)  # zero-termination
+            va = self.path_or_buf.read(length)
+            if typ == 130:
+                va = va[0:-1].decode(self._encoding or self._default_encoding)
+            self.GSO[v_o] = va
 
-    def data(self, convert_dates=True, convert_categoricals=True, index=None,
-             convert_missing=False, preserve_dtypes=True, columns=None):
-        """
-        Reads observations from Stata file, converting them into a dataframe
+    # legacy
+    @Appender('DEPRECATED: ' + _data_method_doc)
+    def data(self, **kwargs):
 
-        Parameters
-        ----------
-        convert_dates : boolean, defaults to True
-            Convert date variables to DataFrame time values
-        convert_categoricals : boolean, defaults to True
-            Read value labels and convert columns to Categorical/Factor
-            variables
-        index : identifier of index column
-            identifier of column that should be used as index of the DataFrame
-        convert_missing : boolean, defaults to False
-            Flag indicating whether to convert missing values to their Stata
-            representation.  If False, missing values are replaced with
-            nans.  If True, columns containing missing values are returned with
-            object data types and missing values are represented by
-            StataMissingValue objects.
-        preserve_dtypes : boolean, defaults to True
-            Preserve Stata datatypes. If False, numeric data are upcast to
-            pandas default types for foreign data (float64 or int64)
-        columns : list or None
-            Columns to retain.  Columns will be returned in the given order.
-            None returns all columns
+        import warnings
+        warnings.warn("'data' is deprecated, use 'read' instead")
 
-        Returns
-        -------
-        y : DataFrame instance
-        """
-        self._missing_values = convert_missing
         if self._data_read:
             raise Exception("Data has already been read.")
         self._data_read = True
 
-        if self.format_version >= 117:
+        return self.read(None, **kwargs)
+
+
+    def __iter__(self):
+        try:
+            if self._chunksize:
+                while True:
+                    yield self.read(self._chunksize)
+            else:
+                yield self.read()
+        except StopIteration:
+            pass
+
+
+    def get_chunk(self, size=None):
+        """
+        Reads lines from Stata file and returns as dataframe
+
+        Parameters
+        ----------
+        size : int, defaults to None
+            Number of lines to read.  If None, reads whole file.
+
+        Returns
+        -------
+        DataFrame
+        """
+        if size is None:
+            size = self._chunksize
+        return self.read(nrows=size)
+
+
+    @Appender(_read_method_doc)
+    def read(self, nrows=None, convert_dates=None,
+             convert_categoricals=None, index=None,
+             convert_missing=None, preserve_dtypes=None,
+             columns=None, order_categoricals=None):
+
+        # Handle empty file or chunk.  If reading incrementally raise
+        # StopIteration.  If reading the whole thing return an empty
+        # data frame.
+        if (self.nobs == 0) and (nrows is None):
+            self._can_read_value_labels = True
+            self._data_read = True
+            return DataFrame(columns=self.varlist)
+
+        # Handle options
+        if convert_dates is None:
+            convert_dates = self._convert_dates
+        if convert_categoricals is None:
+            convert_categoricals = self._convert_categoricals
+        if convert_missing is None:
+            convert_missing = self._convert_missing
+        if preserve_dtypes is None:
+            preserve_dtypes = self._preserve_dtypes
+        if columns is None:
+            columns = self._columns
+        if order_categoricals is None:
+            order_categoricals = self._order_categoricals
+
+        if nrows is None:
+            nrows = self.nobs
+
+        if (self.format_version >= 117) and (self._dtype is None):
+            self._can_read_value_labels = True
             self._read_strls()
 
+        # Setup the dtype.
+        if self._dtype is None:
+            dtype = []  # Convert struct data types to numpy data type
+            for i, typ in enumerate(self.typlist):
+                if typ in self.NUMPY_TYPE_MAP:
+                    dtype.append(('s' + str(i), self.byteorder + self.NUMPY_TYPE_MAP[typ]))
+                else:
+                    dtype.append(('s' + str(i), 'S' + str(typ)))
+            dtype = np.dtype(dtype)
+            self._dtype = dtype
+
         # Read data
-        count = self.nobs
-        dtype = []  # Convert struct data types to numpy data type
-        for i, typ in enumerate(self.typlist):
-            if typ in self.NUMPY_TYPE_MAP:
-                dtype.append(('s' + str(i), self.NUMPY_TYPE_MAP[typ]))
-            else:
-                dtype.append(('s' + str(i), 'S' + str(typ)))
-        dtype = np.dtype(dtype)
-        read_len = count * dtype.itemsize
-        self.path_or_buf.seek(self.data_location)
-        data = np.frombuffer(self.path_or_buf.read(read_len),dtype=dtype,count=count)
-        self._data_read = True
+        dtype = self._dtype
+        max_read_len = (self.nobs - self._lines_read) * dtype.itemsize
+        read_len = nrows * dtype.itemsize
+        read_len = min(read_len, max_read_len)
+        if read_len <= 0:
+            # Iterator has finished, should never be here unless
+            # we are reading the file incrementally
+            self._read_value_labels()
+            raise StopIteration
+        offset = self._lines_read * dtype.itemsize
+        self.path_or_buf.seek(self.data_location + offset)
+        read_lines = min(nrows, self.nobs - self._lines_read)
+        data = np.frombuffer(self.path_or_buf.read(read_len), dtype=dtype,
+                             count=read_lines)
+        self._lines_read += read_lines
+        if self._lines_read == self.nobs:
+            self._can_read_value_labels = True
+            self._data_read = True
+        # if necessary, swap the byte order to native here
+        if self.byteorder != self._native_byteorder:
+            data = data.byteswap().newbyteorder()
 
         if convert_categoricals:
             self._read_value_labels()
@@ -1041,7 +1367,117 @@ class StataReader(StataParser):
             data = DataFrame.from_records(data, index=index)
             data.columns = self.varlist
 
+        # If index is not specified, use actual row number rather than
+        # restarting at 0 for each chunk.
+        if index is None:
+            ix = np.arange(self._lines_read - read_lines, self._lines_read)
+            data = data.set_index(ix)
+
         if columns is not None:
+            data = self._do_select_columns(data, columns)
+
+        # Decode strings
+        for col, typ in zip(data, self.typlist):
+            if type(typ) is int:
+                data[col] = data[col].apply(self._null_terminate, convert_dtype=True)
+
+        data = self._insert_strls(data)
+
+        cols_ = np.where(self.dtyplist)[0]
+
+        # Convert columns (if needed) to match input type
+        index = data.index
+        requires_type_conversion = False
+        data_formatted = []
+        for i in cols_:
+            if self.dtyplist[i] is not None:
+                col = data.columns[i]
+                dtype = data[col].dtype
+                if (dtype != np.dtype(object)) and (dtype != self.dtyplist[i]):
+                    requires_type_conversion = True
+                    data_formatted.append((col, Series(data[col], index, self.dtyplist[i])))
+                else:
+                    data_formatted.append((col, data[col]))
+        if requires_type_conversion:
+            data = DataFrame.from_items(data_formatted)
+        del data_formatted
+
+        self._do_convert_missing(data, convert_missing)
+
+        if convert_dates:
+            cols = np.where(lmap(lambda x: x in _date_formats,
+                                 self.fmtlist))[0]
+            for i in cols:
+                col = data.columns[i]
+                data[col] = _stata_elapsed_date_to_datetime_vec(data[col], self.fmtlist[i])
+
+        if convert_categoricals and self.value_label_dict:
+            data = self._do_convert_categoricals(data, self.value_label_dict, self.lbllist,
+                                             order_categoricals)
+
+        if not preserve_dtypes:
+            retyped_data = []
+            convert = False
+            for col in data:
+                dtype = data[col].dtype
+                if dtype in (np.float16, np.float32):
+                    dtype = np.float64
+                    convert = True
+                elif dtype in (np.int8, np.int16, np.int32):
+                    dtype = np.int64
+                    convert = True
+                retyped_data.append((col, data[col].astype(dtype)))
+            if convert:
+                data = DataFrame.from_items(retyped_data)
+
+        return data
+
+    def _do_convert_missing(self, data, convert_missing):
+        # Check for missing values, and replace if found
+
+        for i, colname in enumerate(data):
+            fmt = self.typlist[i]
+            if fmt not in self.VALID_RANGE:
+                continue
+
+            nmin, nmax = self.VALID_RANGE[fmt]
+            series = data[colname]
+            missing = np.logical_or(series < nmin, series > nmax)
+
+            if not missing.any():
+                continue
+
+            if convert_missing:  # Replacement follows Stata notation
+                missing_loc = np.argwhere(missing)
+                umissing, umissing_loc = np.unique(series[missing],
+                                                   return_inverse=True)
+                replacement = Series(series, dtype=np.object)
+                for j, um in enumerate(umissing):
+                    missing_value = StataMissingValue(um)
+
+                    loc = missing_loc[umissing_loc == j]
+                    replacement.iloc[loc] = missing_value
+            else:  # All replacements are identical
+                dtype = series.dtype
+                if dtype not in (np.float32, np.float64):
+                    dtype = np.float64
+                replacement = Series(series, dtype=dtype)
+                replacement[missing] = np.nan
+
+            data[colname] = replacement
+
+    def _insert_strls(self, data):
+        if not hasattr(self, 'GSO') or len(self.GSO) == 0:
+            return data
+        for i, typ in enumerate(self.typlist):
+            if typ != 'L':
+                continue
+            data.iloc[:, i] = [self.GSO[k] for k in data.iloc[:, i]]
+        return data
+
+    def _do_select_columns(self, data, columns):
+
+        if not self._column_selector_set:
             column_set = set(columns)
             if len(column_set) != len(columns):
                 raise ValueError('columns contains duplicate entries')
@@ -1064,103 +1500,38 @@ class StataReader(StataParser):
                     fmtlist.append(self.fmtlist[i])
                     lbllist.append(self.lbllist[i])
 
-            data = data[columns]
             self.dtyplist = dtyplist
             self.typlist = typlist
             self.fmtlist = fmtlist
             self.lbllist = lbllist
+            self._column_selector_set = True
 
-        for col, typ in zip(data, self.typlist):
-            if type(typ) is int:
-                data[col] = data[col].apply(self._null_terminate, convert_dtype=True,)
+        return data[columns]
 
-        cols_ = np.where(self.dtyplist)[0]
 
-        # Convert columns (if needed) to match input type
-        index = data.index
-        requires_type_conversion = False
-        data_formatted = []
-        for i in cols_:
-            if self.dtyplist[i] is not None:
-                col = data.columns[i]
-                dtype = data[col].dtype
-                if (dtype != np.dtype(object)) and (dtype != self.dtyplist[i]):
-                    requires_type_conversion = True
-                    data_formatted.append((col, Series(data[col], index, self.dtyplist[i])))
-                else:
-                    data_formatted.append((col, data[col]))
-        if requires_type_conversion:
-            data = DataFrame.from_items(data_formatted)
-        del data_formatted
-
-        # Check for missing values, and replace if found
-        for i, colname in enumerate(data):
-            fmt = self.typlist[i]
-            if fmt not in self.VALID_RANGE:
-                continue
-
-            nmin, nmax = self.VALID_RANGE[fmt]
-            series = data[colname]
-            missing = np.logical_or(series < nmin, series > nmax)
-
-            if not missing.any():
-                continue
-
-            if self._missing_values:  # Replacement follows Stata notation
-                missing_loc = np.argwhere(missing)
-                umissing, umissing_loc = np.unique(series[missing],
-                                                   return_inverse=True)
-                replacement = Series(series, dtype=np.object)
-                for i, um in enumerate(umissing):
-                    missing_value = StataMissingValue(um)
-
-                    loc = missing_loc[umissing_loc == i]
-                    replacement.iloc[loc] = missing_value
-            else:  # All replacements are identical
-                dtype = series.dtype
-                if dtype not in (np.float32, np.float64):
-                    dtype = np.float64
-                replacement = Series(series, dtype=dtype)
-                replacement[missing] = np.nan
-
-            data[colname] = replacement
-
-        if convert_dates:
-            cols = np.where(lmap(lambda x: x in _date_formats,
-                                 self.fmtlist))[0]
-            for i in cols:
-                col = data.columns[i]
-                data[col] = _stata_elapsed_date_to_datetime_vec(data[col], self.fmtlist[i])
-
-        if convert_categoricals:
-            cols = np.where(
-                lmap(lambda x: x in compat.iterkeys(self.value_label_dict),
-                     self.lbllist)
-            )[0]
-            for i in cols:
-                col = data.columns[i]
-                labeled_data = np.copy(data[col])
-                labeled_data = labeled_data.astype(object)
-                for k, v in compat.iteritems(
-                        self.value_label_dict[self.lbllist[i]]):
-                    labeled_data[(data[col] == k).values] = v
-                data[col] = Categorical.from_array(labeled_data)
-
-        if not preserve_dtypes:
-            retyped_data = []
-            convert = False
-            for col in data:
-                dtype = data[col].dtype
-                if dtype in (np.float16, np.float32):
-                    dtype = np.float64
-                    convert = True
-                elif dtype in (np.int8, np.int16, np.int32):
-                    dtype = np.int64
-                    convert = True
-                retyped_data.append((col, data[col].astype(dtype)))
-            if convert:
-                data = DataFrame.from_items(retyped_data)
-
+    def _do_convert_categoricals(self, data, value_label_dict, lbllist, order_categoricals):
+        """
+        Converts categorical columns to Categorical type.
+        """
+        value_labels = list(compat.iterkeys(value_label_dict))
+        cat_converted_data = []
+        for col, label in zip(data, lbllist):
+            if label in value_labels:
+                # Explicit call with ordered=True
+                cat_data = Categorical(data[col], ordered=order_categoricals)
+                categories = []
+                for category in cat_data.categories:
+                    if category in value_label_dict[label]:
+                        categories.append(value_label_dict[label][category])
+                    else:
+                        categories.append(category)  # Partially labeled
+                cat_data.categories = categories
+                # TODO: is the next line needed above in the data(...) method?
+                cat_data = Series(cat_data, index=data.index)
+                cat_converted_data.append((col, cat_data))
+            else:
+                cat_converted_data.append((col, data[col]))
+        data = DataFrame.from_items(cat_converted_data)
         return data
 
     def data_label(self):
@@ -1206,13 +1577,6 @@ def _pad_bytes(name, length):
     return name + "\x00" * (length - len(name))
 
 
-def _default_names(nvar):
-    """
-    Returns default Stata names v1, v2, ... vnvar
-    """
-    return ["v%d" % i for i in range(1, nvar+1)]
-
-
 def _convert_datetime_to_stata_type(fmt):
     """
     Converts from one of the stata date formats to a type in TYPE_MAP
@@ -1240,7 +1604,7 @@ def _maybe_convert_to_int_keys(convert_dates, varlist):
     return new_dict
 
 
-def _dtype_to_stata_type(dtype):
+def _dtype_to_stata_type(dtype, column):
     """
     Converts dtype types to stata types. Returns the byte of the given ordinal.
     See TYPE_MAP and comments for an explanation. This is also explained in
@@ -1256,13 +1620,14 @@ def _dtype_to_stata_type(dtype):
     If there are dates to convert, then dtype will already have the correct
     type inserted.
     """
-    #TODO: expand to handle datetime to integer conversion
+    # TODO: expand to handle datetime to integer conversion
     if dtype.type == np.string_:
         return chr(dtype.itemsize)
     elif dtype.type == np.object_:  # try to coerce it to the biggest string
                                     # not memory efficient, what else could we
                                     # do?
-        return chr(244)
+        itemsize = max_len_string_array(column.values)
+        return chr(max(itemsize, 1))
     elif dtype == np.float64:
         return chr(255)
     elif dtype == np.float32:
@@ -1292,6 +1657,7 @@ def _dtype_to_default_stata_fmt(dtype, column):
     int16   -> "%8.0g"
     int8    -> "%8.0g"
     """
+    # TODO: Refactor to combine type with format
     # TODO: expand this to handle a default datetime format?
     if dtype.type == np.object_:
         inferred_dtype = infer_dtype(column.dropna())
@@ -1301,8 +1667,7 @@ def _dtype_to_default_stata_fmt(dtype, column):
         itemsize = max_len_string_array(column.values)
         if itemsize > 244:
             raise ValueError(excessive_string_length_error % column.name)
-
-        return "%" + str(itemsize) + "s"
+        return "%" + str(max(itemsize, 1)) + "s"
     elif dtype == np.float64:
         return "%10.0g"
     elif dtype == np.float32:
@@ -1390,6 +1755,45 @@ class StataWriter(StataParser):
         else:
             self._file.write(to_write)
 
+    def _prepare_categoricals(self, data):
+        """Check for categorigal columns, retain categorical information for
+        Stata file and convert categorical data to int"""
+
+        is_cat = [com.is_categorical_dtype(data[col]) for col in data]
+        self._is_col_cat = is_cat
+        self._value_labels = []
+        if not any(is_cat):
+            return data
+
+        get_base_missing_value = StataMissingValue.get_base_missing_value
+        index = data.index
+        data_formatted = []
+        for col, col_is_cat in zip(data, is_cat):
+            if col_is_cat:
+                self._value_labels.append(StataValueLabel(data[col]))
+                dtype = data[col].cat.codes.dtype
+                if dtype == np.int64:
+                    raise ValueError('It is not possible to export int64-based '
+                                     'categorical data to Stata.')
+                values = data[col].cat.codes.values.copy()
+
+                # Upcast if needed so that correct missing values can be set
+                if values.max() >= get_base_missing_value(dtype):
+                    if dtype == np.int8:
+                        dtype = np.int16
+                    elif dtype == np.int16:
+                        dtype = np.int32
+                    else:
+                        dtype = np.float64
+                    values = np.array(values, dtype=dtype)
+
+                # Replace missing values with Stata missing value for type
+                values[values == -1] = get_base_missing_value(dtype)
+                data_formatted.append((col, values, index))
+
+            else:
+                data_formatted.append((col, data[col]))
+        return DataFrame.from_items(data_formatted)
 
     def _replace_nans(self, data):
         # return data
@@ -1480,27 +1884,28 @@ class StataWriter(StataParser):
     def _prepare_pandas(self, data):
         #NOTE: we might need a different API / class for pandas objects so
         # we can set different semantics - handle this with a PR to pandas.io
-        class DataFrameRowIter(object):
-            def __init__(self, data):
-                self.data = data
 
-            def __iter__(self):
-                for row in data.itertuples():
-                    # First element is index, so remove
-                    yield row[1:]
+        data = data.copy()
 
         if self._write_index:
             data = data.reset_index()
-        # Check columns for compatibility with stata
-        data = _cast_to_stata_types(data)
+
         # Ensure column names are strings
         data = self._check_column_names(data)
+
+        # Check columns for compatibility with stata, upcast if necessary
+        data = _cast_to_stata_types(data)
+
         # Replace NaNs with Stata missing values
         data = self._replace_nans(data)
-        self.datarows = DataFrameRowIter(data)
+
+        # Convert categoricals to int data, and strip labels
+        data = self._prepare_categoricals(data)
+
         self.nobs, self.nvar = data.shape
         self.data = data
         self.varlist = data.columns.tolist()
+
         dtypes = data.dtypes
         if self._convert_dates is not None:
             self._convert_dates = _maybe_convert_to_int_keys(
@@ -1511,10 +1916,12 @@ class StataWriter(StataParser):
                     self._convert_dates[key]
                 )
                 dtypes[key] = np.dtype(new_type)
-        self.typlist = [_dtype_to_stata_type(dt) for dt in dtypes]
+        self.typlist = []
         self.fmtlist = []
         for col, dtype in dtypes.iteritems():
             self.fmtlist.append(_dtype_to_default_stata_fmt(dtype, data[col]))
+            self.typlist.append(_dtype_to_stata_type(dtype, data[col]))
+
         # set the given format for the datetime cols
         if self._convert_dates is not None:
             for key in self._convert_dates:
@@ -1529,7 +1936,13 @@ class StataWriter(StataParser):
         self._write(_pad_bytes("", 5))
         self._prepare_data()
         self._write_data()
+        self._write_value_labels()
         self._file.close()
+
+    def _write_value_labels(self):
+        for vl in self._value_labels:
+            self._file.write(vl.generate_value_label(self._byteorder,
+                                                     self._encoding))
 
     def _write_header(self, data_label=None, time_stamp=None):
         byteorder = self._byteorder
@@ -1585,9 +1998,15 @@ class StataWriter(StataParser):
             self._write(_pad_bytes(fmt, 49))
 
         # lbllist, 33*nvar, char array
-        #NOTE: this is where you could get fancy with pandas categorical type
         for i in range(nvar):
-            self._write(_pad_bytes("", 33))
+            # Use variable name when categorical
+            if self._is_col_cat[i]:
+                name = self.varlist[i]
+                name = self._null_terminate(name, True)
+                name = _pad_bytes(name[:32], 33)
+                self._write(name)
+            else:  # Default is empty label
+                self._write(_pad_bytes("", 33))
 
     def _write_variable_labels(self, labels=None):
         nvar = self.nvar
@@ -1596,7 +2015,7 @@ class StataWriter(StataParser):
                 self._write(_pad_bytes("", 81))
 
     def _prepare_data(self):
-        data = self.data.copy()
+        data = self.data
         typlist = self.typlist
         convert_dates = self._convert_dates
         # 1. Convert dates
@@ -1624,9 +2043,6 @@ class StataWriter(StataParser):
                 data_cols.append(data[col].values)
         dtype = np.dtype(dtype)
 
-        # 3. Convert to record array
-
-        # data.to_records(index=False, convert_datetime64=False)
         if has_strings:
             self.data = np.fromiter(zip(*data_cols), dtype=dtype)
         else:

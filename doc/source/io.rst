@@ -82,13 +82,15 @@ They can take a number of arguments:
     (including http, ftp, and S3 locations), or any object with a ``read``
     method (such as an open file or ``StringIO``).
   - ``sep`` or ``delimiter``: A delimiter / separator to split fields
-    on. `read_csv` is capable of inferring the delimiter automatically in some
-    cases by "sniffing." The separator may be specified as a regular
-    expression; for instance you may use '\|\\s*' to indicate a pipe plus
-    arbitrary whitespace.
+    on. With ``sep=None``, ``read_csv`` will try to infer the delimiter
+    automatically in some cases by "sniffing".
+    The separator may be specified as a regular expression; for instance
+    you may use '\|\\s*' to indicate a pipe plus arbitrary whitespace.
   - ``delim_whitespace``: Parse whitespace-delimited (spaces or tabs) file
     (much faster than using a regular expression)
   - ``compression``: decompress ``'gzip'`` and ``'bz2'`` formats on the fly.
+    Set to  ``'infer'`` (the default) to guess a format based on the file
+    extension.
   - ``dialect``: string or :class:`python:csv.Dialect` instance to expose more
     ways to specify the file format
   - ``dtype``: A data type name or a dict of column name to data type. If not
@@ -563,7 +565,7 @@ writing to a file). For example:
 
 Date Parsing Functions
 ~~~~~~~~~~~~~~~~~~~~~~
-Finally, the parser allows you can specify a custom ``date_parser`` function to
+Finally, the parser allows you to specify a custom ``date_parser`` function to
 take full advantage of the flexibility of the date parsing API:
 
 .. ipython:: python
@@ -572,6 +574,31 @@ take full advantage of the flexibility of the date parsing API:
    df = pd.read_csv('tmp.csv', header=None, parse_dates=date_spec,
                     date_parser=conv.parse_date_time)
    df
+
+Pandas will try to call the ``date_parser`` function in three different ways. If
+an exception is raised, the next one is tried:
+
+1. ``date_parser`` is first called with one or more arrays as arguments,
+   as defined using `parse_dates` (e.g., ``date_parser(['2013', '2013'], ['1', '2'])``)
+
+2. If #1 fails, ``date_parser`` is called with all the columns
+   concatenated row-wise into a single array (e.g., ``date_parser(['2013 1', '2013 2'])``)
+
+3. If #2 fails, ``date_parser`` is called once for every row with one or more
+   string arguments from the columns indicated with `parse_dates`
+   (e.g., ``date_parser('2013', '1')`` for the first row, ``date_parser('2013', '2')``
+   for the second, etc.)
+
+Note that performance-wise, you should try these methods of parsing dates in order:
+
+1. Try to infer the format using ``infer_datetime_format=True`` (see section below)
+
+2. If you know the format, use ``pd.to_datetime()``:
+   ``date_parser=lambda x: pd.to_datetime(x, format=...)``
+
+3. If you have a really non-standard format, use a custom ``date_parser`` function.
+   For optimal performance, this should be vectorized, i.e., it should accept arrays
+   as arguments.
 
 You can explore the date parsing functionality in ``date_converters.py`` and
 add your own. We would love to turn this module into a community supported set
@@ -1060,8 +1087,8 @@ Automatically "sniffing" the delimiter
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ``read_csv`` is capable of inferring delimited (not necessarily
-comma-separated) files. YMMV, as pandas uses the :class:`python:csv.Sniffer`
-class of the csv module.
+comma-separated) files, as pandas uses the :class:`python:csv.Sniffer`
+class of the csv module. For this, you have to specify ``sep=None``.
 
 .. ipython:: python
    :suppress:
@@ -1073,7 +1100,7 @@ class of the csv module.
 .. ipython:: python
 
     print(open('tmp2.sv').read())
-    pd.read_csv('tmp2.sv')
+    pd.read_csv('tmp2.sv', sep=None, engine='python')
 
 .. _io.chunking:
 
@@ -1924,55 +1951,106 @@ module and use the same parsing code as the above to convert tabular data into
 a DataFrame. See the :ref:`cookbook<cookbook.excel>` for some
 advanced strategies
 
-Besides ``read_excel`` you can also read Excel files using the ``ExcelFile``
-class. The following two commands are equivalent:
+Reading Excel Files
+~~~~~~~~~~~~~~~~~~~
+
+.. versionadded:: 0.16
+
+``read_excel`` can read more than one sheet, by setting ``sheetname`` to either
+a list of sheet names, a list of sheet positions, or ``None`` to read all sheets.
+
+.. versionadded:: 0.13
+
+Sheets can be specified by sheet index or sheet name, using an integer or string,
+respectively.
+
+.. versionadded:: 0.12
+
+``ExcelFile`` has been moved to the top level namespace.
+
+There are two approaches to reading an excel file.  The ``read_excel`` function
+and the ``ExcelFile`` class.  ``read_excel`` is for reading one file
+with file-specific arguments (ie. identical data formats across sheets).
+``ExcelFile`` is for reading one file with sheet-specific arguments (ie. various data
+formats across sheets).  Choosing the approach is largely a question of
+code readability and execution speed.
+
+Equivalent class and function approaches to read a single sheet:
 
 .. code-block:: python
 
     # using the ExcelFile class
     xls = pd.ExcelFile('path_to_file.xls')
-    xls.parse('Sheet1', index_col=None, na_values=['NA'])
+    data = xls.parse('Sheet1', index_col=None, na_values=['NA'])
 
     # using the read_excel function
-    read_excel('path_to_file.xls', 'Sheet1', index_col=None, na_values=['NA'])
+    data = read_excel('path_to_file.xls', 'Sheet1', index_col=None, na_values=['NA'])
 
-The class based approach can be used to read multiple sheets or to introspect
-the sheet names using the ``sheet_names`` attribute.
-
-.. note::
-
-   The prior method of accessing ``ExcelFile`` has been moved from
-   ``pandas.io.parsers`` to the top level namespace starting from pandas
-   0.12.0.
-
-.. versionadded:: 0.13
-
-There are now two ways to read in sheets from an Excel file. You can provide
-either the index of a sheet or its name to by passing different values for
-``sheet_name``.
-
-- Pass a string to refer to the name of a particular sheet in the workbook.
-- Pass an integer to refer to the index of a sheet. Indices follow Python
-  convention, beginning at 0.
-- The default value is ``sheet_name=0``. This reads the first sheet.
-
-Using the sheet name:
+Equivalent class and function approaches to read multiple sheets:
 
 .. code-block:: python
 
+    data = {}
+    # For when Sheet1's format differs from Sheet2
+    xls = pd.ExcelFile('path_to_file.xls')
+    data['Sheet1'] = xls.parse('Sheet1', index_col=None, na_values=['NA'])
+    data['Sheet2'] = xls.parse('Sheet2', index_col=1)
+
+    # For when Sheet1's format is identical to Sheet2
+    data = read_excel('path_to_file.xls', ['Sheet1','Sheet2'], index_col=None, na_values=['NA'])
+
+Specifying Sheets
++++++++++++++++++
+
+.. _io.specifying_sheets:
+
+.. note :: The second argument is ``sheetname``, not to be confused with ``ExcelFile.sheet_names``
+
+.. note :: An ExcelFile's attribute ``sheet_names`` provides access to a list of sheets.
+
+- The arguments ``sheetname`` allows specifying the sheet or sheets to read.
+- The default value for ``sheetname`` is 0, indicating to read the first sheet
+- Pass a string to refer to the name of a particular sheet in the workbook.
+- Pass an integer to refer to the index of a sheet. Indices follow Python
+  convention, beginning at 0.
+- Pass a list of either strings or integers, to return a dictionary of specified sheets.
+- Pass a ``None`` to return a dictionary of all available sheets.
+
+.. code-block:: python
+
+   # Returns a DataFrame
    read_excel('path_to_file.xls', 'Sheet1', index_col=None, na_values=['NA'])
 
 Using the sheet index:
 
 .. code-block:: python
 
+   # Returns a DataFrame
    read_excel('path_to_file.xls', 0, index_col=None, na_values=['NA'])
 
 Using all default values:
 
 .. code-block:: python
 
+   # Returns a DataFrame
    read_excel('path_to_file.xls')
+
+Using None to get all sheets:
+
+.. code-block:: python
+
+   # Returns a dictionary of DataFrames
+   read_excel('path_to_file.xls',sheetname=None)
+
+Using a list to get multiple sheets:
+
+.. code-block:: python
+
+   # Returns the 1st and 4th sheet, as a dictionary of DataFrames.
+   read_excel('path_to_file.xls',sheetname=['Sheet1',3])
+
+Parsing Specific Columns
+++++++++++++++++++++++++
 
 It is often the case that users will insert columns to do temporary computations
 in Excel and you may not want to read in those columns. `read_excel` takes
@@ -1991,6 +2069,31 @@ indices to be parsed.
 .. code-block:: python
 
    read_excel('path_to_file.xls', 'Sheet1', parse_cols=[0, 2, 3])
+
+Cell Converters
++++++++++++++++
+
+It is possible to transform the contents of Excel cells via the `converters`
+option. For instance, to convert a column to boolean:
+
+.. code-block:: python
+
+   read_excel('path_to_file.xls', 'Sheet1', converters={'MyBools': bool})
+
+This options handles missing values and treats exceptions in the converters
+as missing data. Transformations are applied cell by cell rather than to the
+column as a whole, so the array dtype is not guaranteed. For instance, a
+column of integers with missing values cannot be transformed to an array
+with integer dtype, because NaN is strictly a float. You can manually mask
+missing data to recover integer dtype:
+
+.. code-block:: python
+
+   cfun = lambda x: int(x) if x else -1
+   read_excel('path_to_file.xls', 'Sheet1', converters={'MyInts': cfun})
+
+Writing Excel Files
+~~~~~~~~~~~~~~~~~~~
 
 To write a DataFrame object to a sheet of an Excel file, you can use the
 ``to_excel`` instance method.  The arguments are largely the same as ``to_csv``
@@ -2327,7 +2430,7 @@ Closing a Store, Context Manager
 
    # Working with, and automatically closing the store with the context
    # manager
-   with get_store('store.h5') as store:
+   with HDFStore('store.h5') as store:
        store.keys()
 
 .. ipython:: python
@@ -3070,6 +3173,53 @@ conversion may not be necessary in future versions of pandas)
        df
        df.dtypes
 
+.. _io.hdf5-categorical:
+
+Categorical Data
+~~~~~~~~~~~~~~~~
+
+.. versionadded:: 0.15.2
+
+Writing data to a ``HDFStore`` that contains a ``category`` dtype was implemented
+in 0.15.2. Queries work the same as if it was an object array. However, the ``category`` dtyped data is
+stored in a more efficient manner.
+
+.. ipython:: python
+
+   dfcat = DataFrame({ 'A' : Series(list('aabbcdba')).astype('category'),
+                       'B' : np.random.randn(8) })
+   dfcat
+   dfcat.dtypes
+   cstore = pd.HDFStore('cats.h5', mode='w')
+   cstore.append('dfcat', dfcat, format='table', data_columns=['A'])
+   result = cstore.select('dfcat', where="A in ['b','c']")
+   result
+   result.dtypes
+
+.. warning::
+
+   The format of the ``Categorical`` is readable by prior versions of pandas (< 0.15.2), but will retrieve
+   the data as an integer based column (e.g. the ``codes``). However, the ``categories`` *can* be retrieved
+   but require the user to select them manually using the explicit meta path.
+
+   The data is stored like so:
+
+   .. ipython:: python
+
+      cstore
+
+      # to get the categories
+      cstore.select('dfcat/meta/A/meta')
+
+.. ipython:: python
+   :suppress:
+   :okexcept:
+
+   cstore.close()
+   import os
+   os.remove('cats.h5')
+
+
 String Columns
 ~~~~~~~~~~~~~~
 
@@ -3123,28 +3273,96 @@ You could inadvertently turn an actual ``nan`` value into a missing value.
    store.append('dfss2', dfss, nan_rep='_nan_')
    store.select('dfss2')
 
+.. _io.external_compatibility:
+
 External Compatibility
 ~~~~~~~~~~~~~~~~~~~~~~
 
-``HDFStore`` write ``table`` format objects in specific formats suitable for
+``HDFStore`` writes ``table`` format objects in specific formats suitable for
 producing loss-less round trips to pandas objects. For external
 compatibility, ``HDFStore`` can read native ``PyTables`` format
-tables. It is possible to write an ``HDFStore`` object that can easily
-be imported into ``R`` using the ``rhdf5`` library. Create a table
-format store like this:
+tables.
 
-     .. ipython:: python
+It is possible to write an ``HDFStore`` object that can easily be imported into ``R`` using the
+``rhdf5`` library (`Package website`_). Create a table format store like this:
 
-        store_export = HDFStore('export.h5')
-	    store_export.append('df_dc', df_dc, data_columns=df_dc.columns)
-	    store_export
+.. _package website: http://www.bioconductor.org/packages/release/bioc/html/rhdf5.html
 
-     .. ipython:: python
-        :suppress:
+.. ipython:: python
 
-        store_export.close()
-        import os
-        os.remove('export.h5')
+   np.random.seed(1)
+   df_for_r = pd.DataFrame({"first": np.random.rand(100),
+                            "second": np.random.rand(100),
+                            "class": np.random.randint(0, 2, (100,))},
+                            index=range(100))
+   df_for_r.head()
+
+   store_export = HDFStore('export.h5')
+   store_export.append('df_for_r', df_for_r, data_columns=df_dc.columns)
+   store_export
+
+.. ipython:: python
+   :suppress:
+
+   store_export.close()
+   import os
+   os.remove('export.h5')
+
+In R this file can be read into a ``data.frame`` object using the ``rhdf5``
+library. The following example function reads the corresponding column names
+and data values from the values and assembles them into a ``data.frame``:
+
+.. code-block:: R
+
+   # Load values and column names for all datasets from corresponding nodes and
+   # insert them into one data.frame object.
+
+   library(rhdf5)
+
+   loadhdf5data <- function(h5File) {
+
+   listing <- h5ls(h5File)
+   # Find all data nodes, values are stored in *_values and corresponding column
+   # titles in *_items
+   data_nodes <- grep("_values", listing$name)
+   name_nodes <- grep("_items", listing$name)
+   data_paths = paste(listing$group[data_nodes], listing$name[data_nodes], sep = "/")
+   name_paths = paste(listing$group[name_nodes], listing$name[name_nodes], sep = "/")
+   columns = list()
+   for (idx in seq(data_paths)) {
+     # NOTE: matrices returned by h5read have to be transposed to to obtain
+     # required Fortran order!
+     data <- data.frame(t(h5read(h5File, data_paths[idx])))
+     names <- t(h5read(h5File, name_paths[idx]))
+     entry <- data.frame(data)
+     colnames(entry) <- names
+     columns <- append(columns, entry)
+   }
+
+   data <- data.frame(columns)
+
+   return(data)
+   }
+
+Now you can import the ``DataFrame`` into R:
+
+.. code-block:: R
+
+   > data = loadhdf5data("transfer.hdf5")
+   > head(data)
+            first    second class
+   1 0.4170220047 0.3266449     0
+   2 0.7203244934 0.5270581     0
+   3 0.0001143748 0.8859421     1
+   4 0.3023325726 0.3572698     1
+   5 0.1467558908 0.9085352     1
+   6 0.0923385948 0.6233601     1
+
+.. note::
+   The R function lists the entire HDF5 file's contents and assembles the
+   ``data.frame`` object from all matching nodes, so use this only as a
+   starting point if you have stored multiple ``DataFrame`` objects to a
+   single HDF5 file.
 
 Backwards Compatibility
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -3159,53 +3377,53 @@ method ``copy`` to take advantage of the updates. The group attribute
 number of options, please see the docstring.
 
 
-     .. ipython:: python
-        :suppress:
+.. ipython:: python
+   :suppress:
 
-        import os
-        legacy_file_path = os.path.abspath('source/_static/legacy_0.10.h5')
+   import os
+   legacy_file_path = os.path.abspath('source/_static/legacy_0.10.h5')
 
-     .. ipython:: python
+.. ipython:: python
 
-        # a legacy store
-        legacy_store = HDFStore(legacy_file_path,'r')
-        legacy_store
+   # a legacy store
+   legacy_store = HDFStore(legacy_file_path,'r')
+   legacy_store
 
-        # copy (and return the new handle)
-	    new_store = legacy_store.copy('store_new.h5')
-	    new_store
-        new_store.close()
+   # copy (and return the new handle)
+   new_store = legacy_store.copy('store_new.h5')
+   new_store
+   new_store.close()
 
-     .. ipython:: python
-        :suppress:
+.. ipython:: python
+   :suppress:
 
-        legacy_store.close()
-        import os
-        os.remove('store_new.h5')
+   legacy_store.close()
+   import os
+   os.remove('store_new.h5')
 
 
 Performance
 ~~~~~~~~~~~
 
-   - ``Tables`` come with a writing performance penalty as compared to
-     regular stores. The benefit is the ability to append/delete and
-     query (potentially very large amounts of data).  Write times are
-     generally longer as compared with regular stores. Query times can
-     be quite fast, especially on an indexed axis.
-   - You can pass ``chunksize=<int>`` to ``append``, specifying the
-     write chunksize (default is 50000). This will significantly lower
-     your memory usage on writing.
-   - You can pass ``expectedrows=<int>`` to the first ``append``,
-     to set the TOTAL number of expected rows that ``PyTables`` will
-     expected. This will optimize read/write performance.
-   - Duplicate rows can be written to tables, but are filtered out in
-     selection (with the last items being selected; thus a table is
-     unique on major, minor pairs)
-   - A ``PerformanceWarning`` will be raised if you are attempting to
-     store types that will be pickled by PyTables (rather than stored as
-     endemic types). See
-     `Here <http://stackoverflow.com/questions/14355151/how-to-make-pandas-hdfstore-put-operation-faster/14370190#14370190>`__
-     for more information and some solutions.
+- ``tables`` format come with a writing performance penalty as compared to
+  ``fixed`` stores. The benefit is the ability to append/delete and
+  query (potentially very large amounts of data).  Write times are
+  generally longer as compared with regular stores. Query times can
+  be quite fast, especially on an indexed axis.
+- You can pass ``chunksize=<int>`` to ``append``, specifying the
+  write chunksize (default is 50000). This will significantly lower
+  your memory usage on writing.
+- You can pass ``expectedrows=<int>`` to the first ``append``,
+  to set the TOTAL number of expected rows that ``PyTables`` will
+  expected. This will optimize read/write performance.
+- Duplicate rows can be written to tables, but are filtered out in
+  selection (with the last items being selected; thus a table is
+  unique on major, minor pairs)
+- A ``PerformanceWarning`` will be raised if you are attempting to
+  store types that will be pickled by PyTables (rather than stored as
+  endemic types). See
+  `Here <http://stackoverflow.com/questions/14355151/how-to-make-pandas-hdfstore-put-operation-faster/14370190#14370190>`__
+  for more information and some solutions.
 
 Experimental
 ~~~~~~~~~~~~
@@ -3276,6 +3494,7 @@ The key functions are:
     :func:`~pandas.read_sql_table` and :func:`~pandas.read_sql_query` (and for
     backward compatibility) and will delegate to specific function depending on
     the provided input (database table name or sql query).
+    Table names do not need to be quoted if they have special characters.
 
 In the following example, we use the `SQlite <http://www.sqlite.org/>`__ SQL database
 engine. You can use a temporary SQLite database where data are stored in
@@ -3325,11 +3544,33 @@ the database using :func:`~pandas.DataFrame.to_sql`.
 
     data.to_sql('data', engine)
 
-With some databases, writing large DataFrames can result in errors due to packet size limitations being exceeded. This can be avoided by setting the ``chunksize`` parameter when calling ``to_sql``.  For example, the following writes ``data`` to the database in batches of 1000 rows at a time:
+With some databases, writing large DataFrames can result in errors due to
+packet size limitations being exceeded. This can be avoided by setting the
+``chunksize`` parameter when calling ``to_sql``.  For example, the following
+writes ``data`` to the database in batches of 1000 rows at a time:
 
 .. ipython:: python
 
     data.to_sql('data_chunked', engine, chunksize=1000)
+
+SQL data types
+++++++++++++++
+
+:func:`~pandas.DataFrame.to_sql` will try to map your data to an appropriate
+SQL data type based on the dtype of the data. When you have columns of dtype
+``object``, pandas will try to infer the data type.
+
+You can always override the default type by specifying the desired SQL type of
+any of the columns by using the ``dtype`` argument. This argument needs a
+dictionary mapping column names to SQLAlchemy types (or strings for the sqlite3
+fallback mode).
+For example, specifying to use the sqlalchemy ``String`` type instead of the
+default ``Text`` type for string columns:
+
+.. ipython:: python
+
+    from sqlalchemy.types import String
+    data.to_sql('data_dtype', engine, dtype={'Col_1': String})
 
 .. note::
 
@@ -3344,7 +3585,6 @@ With some databases, writing large DataFrames can result in errors due to packet
     this gives an array of strings).
     Because of this, reading the database table back in does **not** generate
     a categorical.
-
 
 Reading Tables
 ~~~~~~~~~~~~~~
@@ -3575,6 +3815,14 @@ data quickly, but it is not a direct replacement for a transactional database.
 You can access the management console to determine project id's by:
 <https://code.google.com/apis/console/b/0/?noredirect>
 
+As of 0.15.2, the gbq module has a function ``generate_bq_schema`` which
+will produce the dictionary representation of the schema.
+
+.. code-block:: python
+
+    df = pandas.DataFrame({'A': [1.0]})
+    gbq.generate_bq_schema(df, default_type='STRING')
+
 .. warning::
 
    To use this module, you will need a valid BigQuery account. See
@@ -3583,75 +3831,14 @@ You can access the management console to determine project id's by:
 
 .. _io.stata:
 
-The :mod:`pandas.io.gbq` module provides a wrapper for Google's BigQuery
-analytics web service to simplify retrieving results from BigQuery tables 
-using SQL-like queries. Result sets are parsed into a pandas 
-DataFrame with a shape derived from the source table. Additionally, 
-DataFrames can be uploaded into BigQuery datasets as tables
-if the source datatypes are compatible with BigQuery ones. The general
-structure of this module and its provided functions are based loosely on those in
- :mod:`pandas.io.sql`.
-
-For specifics on the service itself, see: <https://developers.google.com/bigquery/>
-
-As an example, suppose you want to load all data from an existing table
-: `test_dataset.test_table`
-into BigQuery and pull it into a DataFrame.
-
-.. code-block:: python
-
-   from pandas.io import gbq
-   data_frame = gbq.read_gbq('SELECT * FROM test_dataset.test_table')
-
-The user will then be authenticated by the `bq` command line client - 
-this usually involves the default browser opening to a login page,
-though the process can be done entirely from command line if necessary.
-Datasets and additional parameters can be either configured with `bq`,
-passed in as options to `read_gbq`, or set using Google's gflags (this
-is not officially supported by this module, though care was taken
-to ensure that they should be followed regardless of how you call the
-method). 
-
-Additionally, you can define which column to use as an index as well as a preferred column order as follows:
-
-.. code-block:: python
-
-   data_frame = gbq.read_gbq('SELECT * FROM test_dataset.test_table', index_col='index_column_name', col_order='[col1, col2, col3,...]') 
-
-Finally, if you would like to create a BigQuery table, `my_dataset.my_table`, from the rows of DataFrame, `df`:
-
-.. code-block:: python
-
-   df = pandas.DataFrame({'string_col_name' : ['hello'], 
-         'integer_col_name' : [1],
-         'boolean_col_name' : [True]})
-   schema = ['STRING', 'INTEGER', 'BOOLEAN']
-   data_frame = gbq.to_gbq(df, 'my_dataset.my_table', if_exists='fail', schema = schema)
-
-To add more rows to this, simply:
-
-.. code-block:: python
-
-   df2 = pandas.DataFrame({'string_col_name' : ['hello2'], 
-         'integer_col_name' : [2],
-         'boolean_col_name' : [False]})
-   data_frame = gbq.to_gbq(df2, 'my_dataset.my_table', if_exists='append')
-
-
-
-.. note::
-
-   * There is a hard cap on BigQuery result sets, at 128MB compressed. Also, the BigQuery SQL query language has some oddities,
-   see: <https://developers.google.com/bigquery/query-reference>
-   
-STATA Format
+Stata Format
 ------------
 
 .. versionadded:: 0.12.0
 
 .. _io.stata_writer:
 
-Writing to STATA format
+Writing to Stata format
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 The method :func:`~pandas.core.frame.DataFrame.to_stata` will write a DataFrame
@@ -3662,23 +3849,28 @@ into a .dta file. The format version of this file is always 115 (Stata 12).
    df = DataFrame(randn(10, 2), columns=list('AB'))
    df.to_stata('stata.dta')
 
-*Stata* data files have limited data type support; only strings with 244 or
-fewer characters, ``int8``, ``int16``, ``int32`` and ``float64`` can be stored
-in ``.dta`` files.  *Stata* reserves certain values to represent
-missing data. Furthermore, when a value is encountered outside of the
-permitted range, the data type is upcast to the next larger size.  For
-example, ``int8`` values are restricted to lie between -127 and 100, and so
-variables with values above 100 will trigger a conversion to ``int16``. ``nan``
-values in floating points data types are stored as the basic missing data type
-(``.`` in *Stata*).  It is not possible to indicate missing data values for
-integer data types.
+*Stata* data files have limited data type support; only strings with
+244 or fewer characters, ``int8``, ``int16``, ``int32``, ``float32``
+and ``float64`` can be stored in ``.dta`` files.  Additionally,
+*Stata* reserves certain values to represent missing data. Exporting a
+non-missing value that is outside of the permitted range in Stata for
+a particular data type will retype the variable to the next larger
+size.  For example, ``int8`` values are restricted to lie between -127
+and 100 in Stata, and so variables with values above 100 will trigger
+a conversion to ``int16``. ``nan`` values in floating points data
+types are stored as the basic missing data type (``.`` in *Stata*).
+
+.. note::
+
+    It is not possible to export missing data values for integer data types.
+
 
 The *Stata* writer gracefully handles other data types including ``int64``,
-``bool``, ``uint8``, ``uint16``, ``uint32`` and ``float32`` by upcasting to
+``bool``, ``uint8``, ``uint16``, ``uint32`` by casting to
 the smallest supported type that can represent the data.  For example, data
 with a type of ``uint8`` will be cast to ``int8`` if all values are less than
 100 (the upper bound for non-missing ``int8`` data in *Stata*), or, if values are
-outside of this range, the data is cast to ``int16``.
+outside of this range, the variable is cast to ``int16``.
 
 
 .. warning::
@@ -3687,49 +3879,69 @@ outside of this range, the data is cast to ``int16``.
    if ``int64`` values are larger than 2**53.
 
 .. warning::
-  :class:`~pandas.io.stata.StataWriter`` and
+
+  :class:`~pandas.io.stata.StataWriter` and
   :func:`~pandas.core.frame.DataFrame.to_stata` only support fixed width
   strings containing up to 244 characters, a limitation imposed by the version
   115 dta file format. Attempting to write *Stata* dta files with strings
   longer than 244 characters raises a ``ValueError``.
 
-
 .. _io.stata_reader:
 
-Reading from STATA format
+Reading from Stata format
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The top-level function ``read_stata`` will read a dta format file
-and return a DataFrame:
-The class :class:`~pandas.io.stata.StataReader` will read the header of the
-given dta file at initialization. Its method
-:func:`~pandas.io.stata.StataReader.data` will read the observations,
-converting them to a DataFrame which is returned:
+The top-level function ``read_stata`` will read a dta file and return
+either a DataFrame or a :class:`~pandas.io.stata.StataReader` that can
+be used to read the file incrementally.
 
 .. ipython:: python
 
    pd.read_stata('stata.dta')
 
-Currently the ``index`` is retrieved as a column on read back.
+.. versionadded:: 0.16.0
+
+Specifying a ``chunksize`` yields a
+:class:`~pandas.io.stata.StataReader` instance that can be used to
+read ``chunksize`` lines from the file at a time.  The ``StataReader``
+object can be used as an iterator.
+
+.. ipython:: python
+
+  reader = pd.read_stata('stata.dta', chunksize=3)
+  for df in reader:
+      print(df.shape)
+
+For more fine-grained control, use ``iterator=True`` and specify
+``chunksize`` with each call to
+:func:`~pandas.io.stata.StataReader.read`.
+
+.. ipython:: python
+
+  reader = pd.read_stata('stata.dta', iterator=True)
+  chunk1 = reader.read(5)
+  chunk2 = reader.read(5)
+
+Currently the ``index`` is retrieved as a column.
 
 The parameter ``convert_categoricals`` indicates whether value labels should be
 read and used to create a ``Categorical`` variable from them. Value labels can
-also be retrieved by the function ``variable_labels``, which requires data to be
-called before (see ``pandas.io.stata.StataReader``).
+also be retrieved by the function ``value_labels``, which requires :func:`~pandas.io.stata.StataReader.read`
+to be called before use.
 
 The parameter ``convert_missing`` indicates whether missing value
 representations in Stata should be preserved.  If ``False`` (the default),
 missing values are represented as ``np.nan``.  If ``True``, missing values are
 represented using ``StataMissingValue`` objects, and columns containing missing
-values will have ``dtype`` set to ``object``.
+values will have ``object`` data type.
 
-The StataReader supports .dta Formats 104, 105, 108, 113-115 and 117.
-Alternatively, the function :func:`~pandas.io.stata.read_stata` can be used
+:func:`~pandas.read_stata` and :class:`~pandas.io.stata.StataReader` supports .dta
+formats 104, 105, 108, 113-115 (Stata 10-12) and 117 (Stata 13+).
 
 .. note::
 
-   Setting ``preserve_dtypes=False`` will upcast all integer data types to
-   ``int64`` and all floating point data types to ``float64``.  By default,
+   Setting ``preserve_dtypes=False`` will upcast to the standard pandas data types:
+   ``int64`` for all integer types and ``float64`` for floating point data.  By default,
    the Stata data types are preserved when importing.
 
 .. ipython:: python
@@ -3737,6 +3949,52 @@ Alternatively, the function :func:`~pandas.io.stata.read_stata` can be used
 
    import os
    os.remove('stata.dta')
+
+.. _io.stata-categorical:
+
+Categorical Data
+~~~~~~~~~~~~~~~~
+
+.. versionadded:: 0.15.2
+
+``Categorical`` data can be exported to *Stata* data files as value labeled data.
+The exported data consists of the underlying category codes as integer data values
+and the categories as value labels.  *Stata* does not have an explicit equivalent
+to a ``Categorical`` and information about *whether* the variable is ordered
+is lost when exporting.
+
+.. warning::
+
+    *Stata* only supports string value labels, and so ``str`` is called on the
+    categories when exporting data.  Exporting ``Categorical`` variables with
+    non-string categories produces a warning, and can result a loss of
+    information if the ``str`` representations of the categories are not unique.
+
+Labeled data can similarly be imported from *Stata* data files as ``Categorical``
+variables using the keyword argument ``convert_categoricals`` (``True`` by default).
+The keyword argument ``order_categoricals`` (``True`` by default) determines
+whether imported ``Categorical`` variables are ordered.
+
+.. note::
+
+    When importing categorical data, the values of the variables in the *Stata*
+    data file are not preserved since ``Categorical`` variables always
+    use integer data types between ``-1`` and ``n-1`` where ``n`` is the number
+    of categories. If the original values in the *Stata* data file are required,
+    these can be imported by setting ``convert_categoricals=False``, which will
+    import original data (but not the variable labels). The original values can
+    be matched to the imported categorical data since there is a simple mapping
+    between the original *Stata* data values and the category codes of imported
+    Categorical variables: missing values are assigned code ``-1``, and the
+    smallest original value is assigned ``0``, the second smallest is assigned
+    ``1`` and so on until the largest original value is assigned the code ``n-1``.
+
+.. note::
+
+    *Stata* supports partially labeled series.  These series have value labels for
+    some but not all data values. Importing a partially labeled series will produce
+    a ``Categorial`` with string categories for the values that are labeled and
+    numeric categories for values with no label.
 
 .. _io.perf:
 
@@ -3825,12 +4083,12 @@ And here's the code
        if os.path.exists('test.sql'):
            os.remove('test.sql')
        sql_db = sqlite3.connect('test.sql')
-       sql.write_frame(df, name='test_table', con=sql_db)
+       df.to_sql(name='test_table', con=sql_db)
        sql_db.close()
 
    def test_sql_read():
        sql_db = sqlite3.connect('test.sql')
-       sql.read_frame("select * from test_table", sql_db)
+       pd.read_sql_query("select * from test_table", sql_db)
        sql_db.close()
 
    def test_hdf_fixed_write(df):

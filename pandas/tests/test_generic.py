@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # pylint: disable-msg=E1101,W0612
 
 from datetime import datetime, timedelta
@@ -18,6 +19,7 @@ from pandas.util.testing import (assert_series_equal,
                                  assert_frame_equal,
                                  assert_panel_equal,
                                  assert_almost_equal,
+                                 assert_equal,
                                  ensure_clean)
 import pandas.util.testing as tm
 
@@ -352,6 +354,41 @@ class Generic(object):
             self._compare(o.head(-3), o.head(7))
             self._compare(o.tail(-3), o.tail(7))
 
+
+    def test_size_compat(self):
+        # GH8846
+        # size property should be defined
+
+        o = self._construct(shape=10)
+        self.assertTrue(o.size == np.prod(o.shape))
+        self.assertTrue(o.size == 10**len(o.axes))
+
+    def test_split_compat(self):
+        # xref GH8846
+        o = self._construct(shape=10)
+        self.assertTrue(len(np.array_split(o,5)) == 5)
+        self.assertTrue(len(np.array_split(o,2)) == 2)
+
+    def test_unexpected_keyword(self):  # GH8597
+        from pandas.util.testing import assertRaisesRegexp
+
+        df = DataFrame(np.random.randn(5, 2), columns=['jim', 'joe'])
+        ca = pd.Categorical([0, 0, 2, 2, 3, np.nan])
+        ts = df['joe'].copy()
+        ts[2] = np.nan
+
+        with assertRaisesRegexp(TypeError, 'unexpected keyword'):
+            df.drop('joe', axis=1, in_place=True)
+
+        with assertRaisesRegexp(TypeError, 'unexpected keyword'):
+            df.reindex([1, 0], inplace=True)
+
+        with assertRaisesRegexp(TypeError, 'unexpected keyword'):
+            ca.fillna(0, inplace=True)
+
+        with assertRaisesRegexp(TypeError, 'unexpected keyword'):
+            ts.fillna(0, in_place=True)
+
 class TestSeries(tm.TestCase, Generic):
     _typ = Series
     _comparator = lambda self, x, y: assert_series_equal(x,y)
@@ -585,7 +622,7 @@ class TestSeries(tm.TestCase, Generic):
         result = s.interpolate(method='slinear')
         assert_series_equal(result, expected)
 
-        result = s.interpolate(method='slinear', donwcast='infer')
+        result = s.interpolate(method='slinear', downcast='infer')
         assert_series_equal(result, expected)
         # nearest
         expected = Series([1, 3, 3, 12, 12, 25])
@@ -1300,6 +1337,18 @@ class TestDataFrame(tm.TestCase, Generic):
                 df = DataFrame(index=l0)
                 df = getattr(df, fn)('US/Pacific', level=1)
 
+    def test_set_attribute(self):
+        # Test for consistent setattr behavior when an attribute and a column
+        # have the same name (Issue #8994)
+        df = DataFrame({'x':[1, 2, 3]})
+
+        df.y = 2
+        df['y'] = [2, 4, 6]
+        df.y = 5
+
+        assert_equal(df.y, 5)
+        assert_series_equal(df['y'], Series([2, 4, 6]))
+
 
 class TestPanel(tm.TestCase, Generic):
     _typ = Panel
@@ -1422,8 +1471,8 @@ class TestNDFrame(tm.TestCase):
         self.assertTrue(a.equals(c))
         self.assertTrue(a.equals(d))
         self.assertFalse(a.equals(e))
-        self.assertTrue(e.equals(f)) 
-        
+        self.assertTrue(e.equals(f))
+
     def test_describe_raises(self):
         with tm.assertRaises(NotImplementedError):
             tm.makePanel().describe()

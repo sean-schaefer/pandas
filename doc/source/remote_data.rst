@@ -27,14 +27,14 @@ Remote Data Access
 
 .. _remote_data.data_reader:
 
-Functions from :mod:`pandas.io.data` extract data from various Internet
-sources into a DataFrame. Currently the following sources are supported:
+Functions from :mod:`pandas.io.data` and :mod:`pandas.io.ga` extract data from various Internet sources into a DataFrame. Currently the following sources are supported:
 
-    - Yahoo! Finance
-    - Google Finance
-    - St. Louis FED (FRED)
-    - Kenneth French's data library
-    - World Bank
+    - :ref:`Yahoo! Finance<remote_data.yahoo>`
+    - :ref:`Google Finance<remote_data.google>`
+    - :ref:`St.Louis FED (FRED)<remote_data.fred>`
+    - :ref:`Kenneth French's data library<remote_data.ff>`
+    - :ref:`World Bank<remote_data.wb>`
+    - :ref:`Google Analytics<remote_data.ga>`
 
 It should be noted, that various sources support different kinds of data, so not all sources implement the same methods and the data elements returned might also differ.
 
@@ -49,7 +49,7 @@ Yahoo! Finance
     import datetime
     start = datetime.datetime(2010, 1, 1)
     end = datetime.datetime(2013, 1, 27)
-    f=web.DataReader("F", 'yahoo', start, end)
+    f = web.DataReader("F", 'yahoo', start, end)
     f.ix['2010-01-04']
 
 .. _remote_data.yahoo_options:
@@ -58,10 +58,10 @@ Yahoo! Finance Options
 ----------------------
 ***Experimental***
 
-The Options class allows the download of options data from Yahoo! Finance.
+The ``Options`` class allows the download of options data from Yahoo! Finance.
 
 The ``get_all_data`` method downloads and caches option data for all expiry months
-and provides a formatted ``DataFrame`` with a hierarchical index, so its easy to get
+and provides a formatted ``DataFrame`` with a hierarchical index, so it is easy to get
 to the specific option you want.
 
 .. ipython:: python
@@ -71,10 +71,10 @@ to the specific option you want.
       data = aapl.get_all_data()
       data.iloc[0:5, 0:5]
 
-      #Show the $100 strike puts at all expiry dates:
+      # Show the $100 strike puts at all expiry dates:
       data.loc[(100, slice(None), 'put'),:].iloc[0:5, 0:5]
 
-      #Show the volume traded of $100 strike puts at all expiry dates:
+      # Show the volume traded of $100 strike puts at all expiry dates:
       data.loc[(100, slice(None), 'put'),'Vol'].head()
 
 If you don't want to download all the data, more specific requests can be made.
@@ -121,7 +121,7 @@ Google Finance
     import datetime
     start = datetime.datetime(2010, 1, 1)
     end = datetime.datetime(2013, 1, 27)
-    f=web.DataReader("F", 'google', start, end)
+    f = web.DataReader("F", 'google', start, end)
     f.ix['2010-01-04']
 
 .. _remote_data.fred:
@@ -152,7 +152,7 @@ Dataset names are listed at `Fama/French Data Library
 .. ipython:: python
 
     import pandas.io.data as web
-    ip=web.DataReader("5_Industry_Portfolios", "famafrench")
+    ip = web.DataReader("5_Industry_Portfolios", "famafrench")
     ip[4].ix[192607]
 
 .. _remote_data.wb:
@@ -302,9 +302,8 @@ Problematic Country Codes & Indicators
    :func:`wb.download()` is more flexible.  To achieve this, the warning
    and exception logic changed.
    
-The world bank converts some country codes,
-in their response, which makes error checking by pandas difficult.
-Retired indicators still persist in the search.
+The world bank converts some country codes in their response, which makes error
+checking by pandas difficult. Retired indicators still persist in the search.
 
 Given the new flexibility of 0.15.1, improved error handling by the user
 may be necessary for fringe cases.
@@ -330,7 +329,62 @@ indicators, or a single "bad" (#4 above) country code).
 
 See docstrings for more info.
 
+.. _remote_data.ga:
 
+Google Analytics
+----------------
 
+The :mod:`~pandas.io.ga` module provides a wrapper for
+`Google Analytics API <https://developers.google.com/analytics/devguides>`__
+to simplify retrieving traffic data.
+Result sets are parsed into a pandas DataFrame with a shape and data types
+derived from the source table.
 
+Configuring Access to Google Analytics
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The first thing you need to do is to setup accesses to Google Analytics API. Follow the steps below:
+
+#. In the `Google Developers Console <https://console.developers.google.com>`__
+    #. enable the Analytics API
+    #. create a new project
+    #. create a new Client ID for an "Installed Application" (in the "APIs & auth / Credentials section" of the newly created project)
+    #. download it (JSON file)
+#. On your machine
+    #. rename it to ``client_secrets.json``
+    #. move it to the ``pandas/io`` module directory
+
+The first time you use the :func:`read_ga` funtion, a browser window will open to ask you to authentify to the Google API. Do proceed.
+
+Using the Google Analytics API
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The following will fetch users and pageviews (metrics) data per day of the week, for the first semester of 2014, from a particular property.
+
+.. code-block:: python
+
+    import pandas.io.ga as ga
+    ga.read_ga(
+        account_id  = "2360420",
+        profile_id  = "19462946",
+        property_id = "UA-2360420-5",
+        metrics     = ['users', 'pageviews'],
+        dimensions  = ['dayOfWeek'],
+        start_date  = "2014-01-01",
+        end_date    = "2014-08-01",
+        index_col   = 0,
+        filters     = "pagePath=~aboutus;ga:country==France",
+    )
+
+The only mandatory arguments are ``metrics,`` ``dimensions`` and ``start_date``. We strongly recommend that you always specify the ``account_id``, ``profile_id`` and ``property_id`` to avoid accessing the wrong data bucket in Google Analytics.
+
+The ``index_col`` argument indicates which dimension(s) has to be taken as index.
+
+The ``filters`` argument indicates the filtering to apply to the query. In the above example, the page URL has to contain ``aboutus`` AND the visitors country has to be France.
+
+Detailed information in the following:
+
+* `pandas & google analytics, by yhat <http://blog.yhathq.com/posts/pandas-google-analytics.html>`__
+* `Google Analytics integration in pandas, by Chang She <http://quantabee.wordpress.com/2012/12/17/google-analytics-pandas/>`__
+* `Google Analytics Dimensions and Metrics Reference <https://developers.google.com/analytics/devguides/reporting/core/dimsmets>`_
 

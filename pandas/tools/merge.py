@@ -4,12 +4,11 @@ SQL-style merge routines
 import types
 
 import numpy as np
-from pandas.compat import range, long, lrange, lzip, zip
+from pandas.compat import range, long, lrange, lzip, zip, map, filter
 import pandas.compat as compat
 from pandas.core.categorical import Categorical
 from pandas.core.frame import DataFrame, _merge_doc
 from pandas.core.generic import NDFrame
-from pandas.core.groupby import get_group_index
 from pandas.core.series import Series
 from pandas.core.index import (Index, MultiIndex, _get_combined_index,
                                _ensure_index, _get_consensus_names,
@@ -450,37 +449,29 @@ def _get_join_indexers(left_keys, right_keys, sort=False, how='inner'):
     -------
 
     """
-    if len(left_keys) != len(right_keys):
-        raise AssertionError('left_key and right_keys must be the same length')
+    from functools import partial
 
-    left_labels = []
-    right_labels = []
-    group_sizes = []
+    assert len(left_keys) == len(right_keys), \
+            'left_key and right_keys must be the same length'
 
-    for lk, rk in zip(left_keys, right_keys):
-        llab, rlab, count = _factorize_keys(lk, rk, sort=sort)
+    # bind `sort` arg. of _factorize_keys
+    fkeys = partial(_factorize_keys, sort=sort)
 
-        left_labels.append(llab)
-        right_labels.append(rlab)
-        group_sizes.append(count)
+    # get left & right join labels and num. of levels at each location
+    llab, rlab, shape = map(list, zip( * map(fkeys, left_keys, right_keys)))
 
-    max_groups = long(1)
-    for x in group_sizes:
-        max_groups *= long(x)
+    # get flat i8 keys from label lists
+    lkey, rkey = _get_join_keys(llab, rlab, shape, sort)
 
-    if max_groups > 2 ** 63:  # pragma: no cover
-        left_group_key, right_group_key, max_groups = \
-            _factorize_keys(lib.fast_zip(left_labels),
-                            lib.fast_zip(right_labels))
-    else:
-        left_group_key = get_group_index(left_labels, group_sizes)
-        right_group_key = get_group_index(right_labels, group_sizes)
+    # factorize keys to a dense i8 space
+    # `count` is the num. of unique keys
+    # set(lkey) | set(rkey) == range(count)
+    lkey, rkey, count = fkeys(lkey, rkey)
 
-        left_group_key, right_group_key, max_groups = \
-            _factorize_keys(left_group_key, right_group_key, sort=sort)
-
+    # preserve left frame order if how == 'left' and sort == False
+    kwargs = {'sort':sort} if how == 'left' else {}
     join_func = _join_functions[how]
-    return join_func(left_group_key, right_group_key, max_groups)
+    return join_func(lkey, rkey, count, **kwargs)
 
 
 class _OrderedMerge(_MergeOperation):
@@ -533,27 +524,39 @@ class _OrderedMerge(_MergeOperation):
         return result
 
 
-def _get_multiindex_indexer(join_keys, index, sort=False):
-    shape = []
-    labels = []
-    for level, key in zip(index.levels, join_keys):
-        llab, rlab, count = _factorize_keys(level, key, sort=False)
-        labels.append(rlab)
-        shape.append(count)
+def _get_multiindex_indexer(join_keys, index, sort):
+    from functools import partial
 
-    left_group_key = get_group_index(labels, shape)
-    right_group_key = get_group_index(index.labels, shape)
+    # bind `sort` argument
+    fkeys = partial(_factorize_keys, sort=sort)
 
-    left_group_key, right_group_key, max_groups = \
-        _factorize_keys(left_group_key, right_group_key,
-                        sort=False)
+    # left & right join labels and num. of levels at each location
+    rlab, llab, shape = map(list, zip( * map(fkeys, index.levels, join_keys)))
+    if sort:
+        rlab = list(map(np.take, rlab, index.labels))
+    else:
+        i8copy = lambda a: a.astype('i8', subok=False, copy=True)
+        rlab = list(map(i8copy, index.labels))
 
-    left_indexer, right_indexer = \
-        algos.left_outer_join(com._ensure_int64(left_group_key),
-                              com._ensure_int64(right_group_key),
-                              max_groups, sort=False)
+    # fix right labels if there were any nulls
+    for i in range(len(join_keys)):
+        mask = index.labels[i] == -1
+        if mask.any():
+            # check if there already was any nulls at this location
+            # if there was, it is factorized to `shape[i] - 1`
+            a = join_keys[i][llab[i] == shape[i] - 1]
+            if a.size == 0 or not a[0] != a[0]:
+                shape[i] += 1
 
-    return left_indexer, right_indexer
+            rlab[i][mask] = shape[i] - 1
+
+    # get flat i8 join keys
+    lkey, rkey = _get_join_keys(llab, rlab, shape, sort)
+
+    # factorize keys to a dense i8 space
+    lkey, rkey, count = fkeys(lkey, rkey)
+
+    return algos.left_outer_join(lkey, rkey, count, sort=sort)
 
 
 def _get_single_indexer(join_key, index, sort=False):
@@ -588,9 +591,9 @@ def _left_join_on_index(left_ax, right_ax, join_keys, sort=False):
         # if asked to sort or there are 1-to-many matches
         join_index = left_ax.take(left_indexer)
         return join_index, left_indexer, right_indexer
-    else:
-        # left frame preserves order & length of its index
-        return left_ax, None, right_indexer
+
+    # left frame preserves order & length of its index
+    return left_ax, None, right_indexer
 
 
 def _right_outer_join(x, y, max_groups):
@@ -606,7 +609,7 @@ _join_functions = {
 
 
 def _factorize_keys(lk, rk, sort=True):
-    if com._is_int_or_datetime_dtype(lk) and com._is_int_or_datetime_dtype(rk):
+    if com.is_int_or_datetime_dtype(lk) and com.is_int_or_datetime_dtype(rk):
         klass = _hash.Int64Factorizer
         lk = com._ensure_int64(lk)
         rk = com._ensure_int64(rk)
@@ -660,6 +663,35 @@ def _sort_labels(uniques, left, right):
 
     return new_left, new_right
 
+
+def _get_join_keys(llab, rlab, shape, sort):
+    from pandas.core.groupby import _int64_overflow_possible
+
+    # how many levels can be done without overflow
+    pred = lambda i: not _int64_overflow_possible(shape[:i])
+    nlev = next(filter(pred, range(len(shape), 0, -1)))
+
+    # get keys for the first `nlev` levels
+    stride = np.prod(shape[1:nlev], dtype='i8')
+    lkey = stride * llab[0].astype('i8', subok=False, copy=False)
+    rkey = stride * rlab[0].astype('i8', subok=False, copy=False)
+
+    for i in range(1, nlev):
+        stride //= shape[i]
+        lkey += llab[i] * stride
+        rkey += rlab[i] * stride
+
+    if nlev == len(shape):  # all done!
+        return lkey, rkey
+
+    # densify current keys to avoid overflow
+    lkey, rkey, count = _factorize_keys(lkey, rkey, sort=sort)
+
+    llab = [lkey] + llab[nlev:]
+    rlab = [rkey] + rlab[nlev:]
+    shape = [count] + shape[nlev:]
+
+    return _get_join_keys(llab, rlab, shape, sort)
 
 #----------------------------------------------------------------------
 # Concatenate DataFrame objects
@@ -1005,7 +1037,7 @@ def _make_concat_multiindex(indexes, keys, levels=None, names=None):
             names = [None] * len(zipped)
 
         if levels is None:
-            levels = [Categorical.from_array(zp).categories for zp in zipped]
+            levels = [Categorical.from_array(zp, ordered=True).categories for zp in zipped]
         else:
             levels = [_ensure_index(x) for x in levels]
     else:
@@ -1043,7 +1075,7 @@ def _make_concat_multiindex(indexes, keys, levels=None, names=None):
             levels.extend(concat_index.levels)
             label_list.extend(concat_index.labels)
         else:
-            factor = Categorical.from_array(concat_index)
+            factor = Categorical.from_array(concat_index, ordered=True)
             levels.append(factor.categories)
             label_list.append(factor.codes)
 

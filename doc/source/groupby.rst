@@ -12,7 +12,11 @@
    np.set_printoptions(precision=4, suppress=True)
    import matplotlib.pyplot as plt
    plt.close('all')
-   options.display.mpl_style='default'
+   import matplotlib
+   try:
+      matplotlib.style.use('ggplot')
+   except AttributeError:
+      options.display.mpl_style = 'default'
    from pandas.compat import zip
 
 *****************************
@@ -337,6 +341,21 @@ In the case of grouping by multiple keys, the group name will be a tuple:
 
 It's standard Python-fu but remember you can unpack the tuple in the for loop
 statement if you wish: ``for (k1, k2), group in grouped:``.
+
+Selecting a group
+-----------------
+
+A single group can be selected using ``GroupBy.get_group()``:
+
+.. ipython:: python
+
+   grouped.get_group('bar')
+
+Or for an object grouped on multiple columns:
+
+.. ipython:: python
+
+   df.groupby(['A', 'B']).get_group(('bar', 'one'))
 
 .. _groupby.aggregate:
 

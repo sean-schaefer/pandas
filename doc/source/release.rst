@@ -45,19 +45,158 @@ analysis / manipulation tool available in any language.
 * Binary installers on PyPI: http://pypi.python.org/pypi/pandas
 * Documentation: http://pandas.pydata.org
 
+pandas 0.16.0
+-------------
+
+**Release date:** (March 22, 2015)
+
+This is a major release from 0.15.2 and includes a number of API changes, several new features, enhancements, and
+performance improvements along with a large number of bug fixes.
+
+Highlights include:
+
+- ``DataFrame.assign`` method, see :ref:`here <whatsnew_0160.enhancements.assign>`
+- ``Series.to_coo/from_coo`` methods to interact with ``scipy.sparse``, see :ref:`here <whatsnew_0160.enhancements.sparse>`
+- Backwards incompatible change to ``Timedelta`` to conform the ``.seconds`` attribute with ``datetime.timedelta``, see :ref:`here <whatsnew_0160.api_breaking.timedelta>`
+- Changes to the ``.loc`` slicing API to conform with the behavior of ``.ix`` see :ref:`here <whatsnew_0160.api_breaking.indexing>`
+- Changes to the default for ordering in the ``Categorical`` constructor, see :ref:`here <whatsnew_0160.api_breaking.categorical>`
+- The ``pandas.tools.rplot``, ``pandas.sandbox.qtpandas`` and ``pandas.rpy``
+  modules are deprecated. We refer users to external packages like
+  `seaborn <http://stanford.edu/~mwaskom/software/seaborn/>`_,
+  `pandas-qt <https://github.com/datalyze-solutions/pandas-qt>`_ and
+  `rpy2 <http://rpy.sourceforge.net/>`_ for similar or equivalent
+  functionality, see :ref:`here <whatsnew_0160.deprecations>`
+
+See the :ref:`v0.16.0 Whatsnew <whatsnew_0160>` overview or the issue tracker on GitHub for an extensive list
+of all API changes, enhancements and bugs that have been fixed in 0.16.0.
+
+Thanks
+~~~~~~
+
+- Aaron Toth
+- Alan Du
+- Alessandro Amici
+- Artemy Kolchinsky
+- Ashwini Chaudhary
+- Ben Schiller
+- Bill Letson
+- Brandon Bradley
+- Chau Hoang
+- Chris Reynolds
+- Chris Whelan
+- Christer van der Meeren
+- David Cottrell
+- David Stephens
+- Ehsan Azarnasab
+- Garrett-R
+- Guillaume Gay
+- Jake Torcasso
+- Jason Sexauer
+- Jeff Reback
+- John McNamara
+- Joris Van den Bossche
+- Joschka zur Jacobsmühlen
+- Juarez Bochi
+- Junya Hayashi
+- K.-Michael Aye
+- Kerby Shedden
+- Kevin Sheppard
+- Kieran O'Mahony
+- Kodi Arfer
+- Matti Airas
+- Min RK
+- Mortada Mehyar
+- Robert
+- Scott E Lasley
+- Scott Lasley
+- Sergio Pascual
+- Skipper Seabold
+- Stephan Hoyer
+- Thomas Grainger
+- Tom Augspurger
+- TomAugspurger
+- Vladimir Filimonov
+- Vyomkesh Tripathi
+- Will Holmgren
+- Yulong Yang
+- behzad nouri
+- bertrandhaut
+- bjonen
+- cel4
+- clham
+- hsperr
+- ischwabacher
+- jnmclarty
+- josham
+- jreback
+- omtinez
+- roch
+- sinhrks
+- unutbu
+
 pandas 0.15.2
 -------------
 
-**Release date:** (December ??, 2014)
+**Release date:** (December 12, 2014)
 
-This is a minor release from 0.15.1 and includes a small number of API changes, several new features, enhancements, and
-performance improvements along with a large number of bug fixes.
+This is a minor release from 0.15.1 and includes a large number of bug fixes
+along with several new features, enhancements, and performance improvements.
+A small number of API changes were necessary to fix existing bugs.
 
 See the :ref:`v0.15.2 Whatsnew <whatsnew_0152>` overview for an extensive list
 of all API changes, enhancements and bugs that have been fixed in 0.15.2.
 
 Thanks
 ~~~~~~
+
+- Aaron Staple
+- Angelos Evripiotis
+- Artemy Kolchinsky
+- Benoit Pointet
+- Brian Jacobowski
+- Charalampos Papaloizou
+- Chris Warth
+- David Stephens
+- Fabio Zanini
+- Francesc Via
+- Henry Kleynhans
+- Jake VanderPlas
+- Jan Schulz
+- Jeff Reback
+- Jeff Tratner
+- Joris Van den Bossche
+- Kevin Sheppard
+- Matt Suggit
+- Matthew Brett
+- Phillip Cloud
+- Rupert Thompson
+- Scott E Lasley
+- Stephan Hoyer
+- Stephen Simmons
+- Sylvain Corlay
+- Thomas Grainger
+- Tiago Antao
+- Trent Hauck
+- Victor Chaves
+- Victor Salgado
+- Vikram Bhandoh
+- WANG Aiyong
+- Will Holmgren
+- behzad nouri
+- broessli
+- charalampos papaloizou
+- immerrr
+- jnmclarty
+- jreback
+- mgilbert
+- onesandzeroes
+- peadarcoyle
+- rockg
+- seth-p
+- sinhrks
+- unutbu
+- wavedatalab
+- Åsmund Hjulstad
 
 pandas 0.15.1
 -------------

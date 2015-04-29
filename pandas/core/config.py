@@ -51,6 +51,7 @@ Implementation
 import re
 
 from collections import namedtuple
+from contextlib import contextmanager
 import warnings
 from pandas.compat import map, lmap, u
 import pandas.compat as compat
@@ -108,7 +109,11 @@ def _set_option(*args, **kwargs):
                              "arguments")
 
     # default to false
-    silent = kwargs.get('silent', False)
+    silent = kwargs.pop('silent', False)
+
+    if kwargs:
+        raise TypeError('_set_option() got an unexpected keyword '
+                'argument "{0}"'.format(list(kwargs.keys())[0]))
 
     for k, v in zip(args[::2], args[1::2]):
         key = _get_single_key(k, silent)
@@ -384,18 +389,17 @@ class option_context(object):
                 'option_context(pat, val, [(pat, val), ...)).'
             )
 
-        ops = list(zip(args[::2], args[1::2]))
+        self.ops = list(zip(args[::2], args[1::2]))
+
+    def __enter__(self):
         undo = []
-        for pat, val in ops:
+        for pat, val in self.ops:
             undo.append((pat, _get_option(pat, silent=True)))
 
         self.undo = undo
 
-        for pat, val in ops:
+        for pat, val in self.ops:
             _set_option(pat, val, silent=True)
-
-    def __enter__(self):
-        pass
 
     def __exit__(self, *args):
         if self.undo:
@@ -680,8 +684,6 @@ def pp_options_list(keys, width=80, _print=False):
 
 #
 # helpers
-
-from contextlib import contextmanager
 
 
 @contextmanager

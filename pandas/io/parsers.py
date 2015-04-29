@@ -14,6 +14,7 @@ from pandas.core.index import Index, MultiIndex
 from pandas.core.frame import DataFrame
 import datetime
 import pandas.core.common as com
+from pandas.core.common import AbstractMethodError
 from pandas.core.config import get_option
 from pandas.io.date_converters import generic_parser
 from pandas.io.common import get_filepath_or_buffer
@@ -55,8 +56,11 @@ escapechar : string (length 1), default None
 dtype : Type name or dict of column -> type
     Data type for data or columns. E.g. {'a': np.float64, 'b': np.int32}
     (Unsupported with engine='python')
-compression : {'gzip', 'bz2', None}, default None
-    For on-the-fly decompression of on-disk data
+compression : {'gzip', 'bz2', 'infer', None}, default 'infer'
+    For on-the-fly decompression of on-disk data. If 'infer', then use gzip or
+    bz2 if filepath_or_buffer is a string ending in '.gz' or '.bz2',
+    respectively, and no decompression otherwise. Set to None for no
+    decompression.
 dialect : string or csv.Dialect instance, default None
     If None defaults to Excel dialect. Ignored if sep longer than 1 char
     See csv.Dialect documentation for more details
@@ -104,7 +108,12 @@ keep_date_col : boolean, default False
 date_parser : function
     Function to use for converting a sequence of string columns to an
     array of datetime instances. The default uses dateutil.parser.parser
-    to do the conversion.
+    to do the conversion. Pandas will try to call date_parser in three different
+    ways, advancing to the next if an exception occurs: 1) Pass one or more arrays
+    (as defined by parse_dates) as arguments; 2) concatenate (row-wise) the string
+    values from the columns defined by parse_dates into a single array and pass
+    that; and 3) call date_parser once for each row using one or more strings
+    (corresponding to the columns defined by parse_dates) as arguments.
 dayfirst : boolean, default False
     DD/MM format dates, international and European format
 thousands : str, default None
@@ -127,7 +136,7 @@ chunksize : int, default None
     Return TextFileReader object for iteration
 skipfooter : int, default 0
     Number of lines at bottom of file to skip (Unsupported with engine='c')
-converters : dict. optional
+converters : dict, default None
     Dict of functions for converting values in certain columns. Keys can either
     be integers or column labels
 verbose : boolean, default False
@@ -289,7 +298,7 @@ _parser_defaults = {
     'verbose': False,
     'encoding': None,
     'squeeze': False,
-    'compression': None,
+    'compression': 'infer',
     'mangle_dupe_cols': True,
     'tupleize_cols': False,
     'infer_datetime_format': False,
@@ -329,7 +338,7 @@ def _make_parser_function(name, sep=','):
     def parser_f(filepath_or_buffer,
                  sep=sep,
                  dialect=None,
-                 compression=None,
+                 compression='infer',
 
                  doublequote=True,
                  escapechar=None,
@@ -647,6 +656,8 @@ class TextFileReader(object):
         # really delete this one
         keep_default_na = result.pop('keep_default_na')
 
+        if index_col is True:
+            raise ValueError("The value of index_col couldn't be 'True'")
         if _is_index_col(index_col):
             if not isinstance(index_col, (list, tuple, np.ndarray)):
                 index_col = [index_col]
@@ -700,7 +711,7 @@ class TextFileReader(object):
             self._engine = klass(self.f, **self.options)
 
     def _failover_to_python(self):
-        raise NotImplementedError
+        raise AbstractMethodError(self)
 
     def read(self, nrows=None):
         if nrows is not None:
@@ -983,8 +994,13 @@ class ParserBase(object):
                                                            na_fvalues)
             coerce_type = True
             if conv_f is not None:
-                values = lib.map_infer(values, conv_f)
+                try:
+                    values = lib.map_infer(values, conv_f)
+                except ValueError:
+                    mask = lib.ismember(values, na_values).view(np.uin8)
+                    values = lib.map_infer_mask(values, conv_f, mask)
                 coerce_type = False
+
             cvals, na_count = self._convert_types(
                 values, set(col_na_values) | col_na_fvalues, coerce_type)
             result[c] = cvals
@@ -1269,6 +1285,11 @@ def TextParser(*args, **kwds):
         Row numbers to skip
     skip_footer : int
         Number of line at bottom of file to skip
+    converters : dict, default None
+        Dict of functions for converting values in certain columns. Keys can
+        either be integers or column labels, values are functions that take one
+        input argument, the cell (not column) content, and return the
+        transformed content.
     encoding : string, default None
         Encoding to use for UTF when reading/writing (ex. 'utf-8')
     squeeze : boolean, default False
@@ -1299,6 +1320,7 @@ def _wrap_compressed(f, compression, encoding=None):
     """
     compression = compression.lower()
     encoding = encoding or get_option('display.encoding')
+
     if compression == 'gzip':
         import gzip
 
@@ -1370,6 +1392,17 @@ class PythonParser(ParserBase):
         self.thousands = kwds['thousands']
         self.comment = kwds['comment']
         self._comment_lines = []
+
+        if self.compression == 'infer':
+            if isinstance(f, compat.string_types):
+                if f.endswith('.gz'):
+                    self.compression = 'gzip'
+                elif f.endswith('.bz2'):
+                    self.compression = 'bz2'
+                else:
+                    self.compression = None
+            else:
+                self.compression = None
 
         if isinstance(f, compat.string_types):
             f = com._get_handle(f, 'r', encoding=self.encoding,

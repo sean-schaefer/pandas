@@ -61,13 +61,6 @@ from pandas.core.internals import BlockManager, make_block
 import pandas.core.internals as internals
 
 from pandas.msgpack import Unpacker as _Unpacker, Packer as _Packer
-import zlib
-
-try:
-    import blosc
-    _BLOSC = True
-except:
-    _BLOSC = False
 
 # until we can pass this into our conversion functions,
 # this is pretty hacky
@@ -218,9 +211,10 @@ def convert(values):
 
         # convert to a bytes array
         v = v.tostring()
+        import zlib
         return zlib.compress(v)
 
-    elif compressor == 'blosc' and _BLOSC:
+    elif compressor == 'blosc':
 
         # return string arrays like they are
         if dtype == np.object_:
@@ -228,6 +222,7 @@ def convert(values):
 
         # convert to a bytes array
         v = v.tostring()
+        import blosc
         return blosc.compress(v, typesize=dtype.itemsize)
 
     # ndarray (on original dtype)
@@ -239,23 +234,20 @@ def unconvert(values, dtype, compress=None):
     if dtype == np.object_:
         return np.array(values, dtype=object)
 
-    if compress == 'zlib':
+    values = values.encode('latin1')
 
+    if compress == 'zlib':
+        import zlib
         values = zlib.decompress(values)
         return np.frombuffer(values, dtype=dtype)
 
     elif compress == 'blosc':
-
-        if not _BLOSC:
-            raise Exception("cannot uncompress w/o blosc")
-
-        # decompress
+        import blosc
         values = blosc.decompress(values)
-
         return np.frombuffer(values, dtype=dtype)
 
     # from a string
-    return np.fromstring(values.encode('latin1'), dtype=dtype)
+    return np.fromstring(values, dtype=dtype)
 
 
 def encode(obj):
@@ -271,7 +263,8 @@ def encode(obj):
                     'name': getattr(obj, 'name', None),
                     'freq': getattr(obj, 'freqstr', None),
                     'dtype': obj.dtype.num,
-                    'data': convert(obj.asi8)}
+                    'data': convert(obj.asi8),
+                    'compress': compressor}
         elif isinstance(obj, DatetimeIndex):
             tz = getattr(obj, 'tz', None)
 
@@ -285,19 +278,22 @@ def encode(obj):
                     'dtype': obj.dtype.num,
                     'data': convert(obj.asi8),
                     'freq': getattr(obj, 'freqstr', None),
-                    'tz': tz}
+                    'tz': tz,
+                    'compress': compressor}
         elif isinstance(obj, MultiIndex):
             return {'typ': 'multi_index',
                     'klass': obj.__class__.__name__,
                     'names': getattr(obj, 'names', None),
                     'dtype': obj.dtype.num,
-                    'data': convert(obj.values)}
+                    'data': convert(obj.values),
+                    'compress': compressor}
         else:
             return {'typ': 'index',
                     'klass': obj.__class__.__name__,
                     'name': getattr(obj, 'name', None),
                     'dtype': obj.dtype.num,
-                    'data': convert(obj.values)}
+                    'data': convert(obj.values),
+                    'compress': compressor}
     elif isinstance(obj, Series):
         if isinstance(obj, SparseSeries):
             raise NotImplementedError(
@@ -476,7 +472,9 @@ def decode(obj):
         index = obj['index']
         return globals()[obj['klass']](unconvert(obj['data'], dtype,
                                                  obj['compress']),
-                                       index=index, name=obj['name'])
+                                       index=index,
+                                       dtype=dtype,
+                                       name=obj['name'])
     elif typ == 'block_manager':
         axes = obj['axes']
 

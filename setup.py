@@ -11,13 +11,17 @@ import sys
 import shutil
 import warnings
 import re
+from distutils.version import LooseVersion
 
 # may need to work around setuptools bug by providing a fake Pyrex
+min_cython_ver = '0.19.1'
 try:
     import Cython
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), "fake_pyrex"))
+    ver = Cython.__version__
+    _CYTHON_INSTALLED = ver >= LooseVersion(min_cython_ver)
 except ImportError:
-    pass
+    _CYTHON_INSTALLED = False
 
 # try bootstrapping setuptools if it doesn't exist
 try:
@@ -74,6 +78,8 @@ from distutils.command.sdist import sdist
 from distutils.command.build_ext import build_ext as _build_ext
 
 try:
+    if not _CYTHON_INSTALLED:
+        raise ImportError('No supported version of Cython installed.')
     from Cython.Distutils import build_ext as _build_ext
     # from Cython.Distutils import Extension # to get pyrex debugging symbols
     cython = True
@@ -170,7 +176,7 @@ EMAIL = "pydata@googlegroups.com"
 URL = "http://pandas.pydata.org"
 DOWNLOAD_URL = ''
 CLASSIFIERS = [
-    'Development Status :: 4 - Beta',
+    'Development Status :: 5 - Production/Stable',
     'Environment :: Console',
     'Operating System :: OS Independent',
     'Intended Audience :: Science/Research',
@@ -187,8 +193,8 @@ CLASSIFIERS = [
 ]
 
 MAJOR = 0
-MINOR = 15
-MICRO = 1
+MINOR = 16
+MICRO = 0
 ISRELEASED = False
 VERSION = '%d.%d.%d' % (MAJOR, MINOR, MICRO)
 QUALIFIER = ''
@@ -265,31 +271,35 @@ class CleanCommand(Command):
         self.all = True
         self._clean_me = []
         self._clean_trees = []
-        self._clean_exclude = ['np_datetime.c',
-                               'np_datetime_strings.c',
-                               'period.c',
-                               'tokenizer.c',
-                               'io.c',
-                               'ujson.c',
-                               'objToJSON.c',
-                               'JSONtoObj.c',
-                               'ultrajsonenc.c',
-                               'ultrajsondec.c',
+
+        base = pjoin('pandas','src')
+        dt = pjoin(base,'datetime')
+        src = base
+        parser = pjoin(base,'parser')
+        ujson_python = pjoin(base,'ujson','python')
+        ujson_lib = pjoin(base,'ujson','lib')
+        self._clean_exclude = [pjoin(dt,'np_datetime.c'),
+                               pjoin(dt,'np_datetime_strings.c'),
+                               pjoin(src,'period_helper.c'),
+                               pjoin(parser,'tokenizer.c'),
+                               pjoin(parser,'io.c'),
+                               pjoin(ujson_python,'ujson.c'),
+                               pjoin(ujson_python,'objToJSON.c'),
+                               pjoin(ujson_python,'JSONtoObj.c'),
+                               pjoin(ujson_lib,'ultrajsonenc.c'),
+                               pjoin(ujson_lib,'ultrajsondec.c'),
                                ]
 
         for root, dirs, files in os.walk('pandas'):
             for f in files:
-                if f in self._clean_exclude:
-                    continue
-
-                # XXX
-                if 'ujson' in f:
+                filepath = pjoin(root, f)
+                if filepath in self._clean_exclude:
                     continue
 
                 if os.path.splitext(f)[-1] in ('.pyc', '.so', '.o',
                                                '.pyo',
                                                '.pyd', '.c', '.orig'):
-                    self._clean_me.append(pjoin(root, f))
+                    self._clean_me.append(filepath)
             for d in dirs:
                 if d == '__pycache__':
                     self._clean_trees.append(pjoin(root, d))
@@ -441,7 +451,7 @@ lib_depends = lib_depends + ['pandas/src/numpy_helper.h',
 
 tseries_depends = ['pandas/src/datetime/np_datetime.h',
                    'pandas/src/datetime/np_datetime_strings.h',
-                   'pandas/src/period.h']
+                   'pandas/src/period_helper.h']
 
 
 # some linux distros require it
@@ -452,24 +462,30 @@ ext_data = dict(
          'pxdfiles': [],
          'depends': lib_depends},
     hashtable={'pyxfile': 'hashtable',
-               'pxdfiles': ['hashtable']},
+               'pxdfiles': ['hashtable'],
+               'depends': ['pandas/src/klib/khash_python.h']},
     tslib={'pyxfile': 'tslib',
            'depends': tseries_depends,
            'sources': ['pandas/src/datetime/np_datetime.c',
                        'pandas/src/datetime/np_datetime_strings.c',
-                       'pandas/src/period.c']},
+                       'pandas/src/period_helper.c']},
+    _period={'pyxfile': 'src/period',
+             'depends': tseries_depends,
+             'sources': ['pandas/src/datetime/np_datetime.c',
+                         'pandas/src/datetime/np_datetime_strings.c',
+                         'pandas/src/period_helper.c']},
     index={'pyxfile': 'index',
            'sources': ['pandas/src/datetime/np_datetime.c',
                        'pandas/src/datetime/np_datetime_strings.c']},
     algos={'pyxfile': 'algos',
            'depends': [srcpath('generated', suffix='.pyx'),
                        srcpath('join', suffix='.pyx')]},
-    parser=dict(pyxfile='parser',
-                depends=['pandas/src/parser/tokenizer.h',
-                         'pandas/src/parser/io.h',
-                         'pandas/src/numpy_helper.h'],
-                sources=['pandas/src/parser/tokenizer.c',
-                         'pandas/src/parser/io.c'])
+    parser={'pyxfile': 'parser',
+            'depends': ['pandas/src/parser/tokenizer.h',
+                        'pandas/src/parser/io.h',
+                        'pandas/src/numpy_helper.h'],
+            'sources': ['pandas/src/parser/tokenizer.c',
+                        'pandas/src/parser/io.c']}
 )
 
 extensions = []
@@ -585,12 +601,8 @@ setup(name=DISTNAME,
                 'pandas.stats.tests',
                 ],
       package_data={'pandas.io': ['tests/data/legacy_hdf/*.h5',
-                                  'tests/data/legacy_pickle/0.10.1/*.pickle',
-                                  'tests/data/legacy_pickle/0.11.0/*.pickle',
-                                  'tests/data/legacy_pickle/0.12.0/*.pickle',
-                                  'tests/data/legacy_pickle/0.13.0/*.pickle',
-                                  'tests/data/legacy_pickle/0.14.0/*.pickle',
-                                  'tests/data/*.csv',
+                                  'tests/data/legacy_pickle/*/*.pickle',
+                                  'tests/data/*.csv*',
                                   'tests/data/*.dta',
                                   'tests/data/*.txt',
                                   'tests/data/*.xls',

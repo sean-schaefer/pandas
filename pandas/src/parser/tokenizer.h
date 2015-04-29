@@ -127,6 +127,7 @@ typedef enum {
     EAT_COMMENT,
     EAT_LINE_COMMENT,
     WHITESPACE_LINE,
+    SKIP_LINE,
     FINISHED
 } ParserState;
 
@@ -203,6 +204,7 @@ typedef struct parser_t {
     int header_end;   // header row end
 
     void *skipset;
+    int64_t skip_first_N_rows;
     int skip_footer;
     double (*converter)(const char *, char **, char, char, char, int);
 
@@ -212,8 +214,6 @@ typedef struct parser_t {
 
     int skip_empty_lines;
 } parser_t;
-
-
 
 
 typedef struct coliter_t {
@@ -228,9 +228,12 @@ coliter_t *coliter_new(parser_t *self, int i);
 /* #define COLITER_NEXT(iter) iter->words[iter->line_start[iter->line++] + iter->col] */
 // #define COLITER_NEXT(iter) iter.words[iter.line_start[iter.line++] + iter.col]
 
-#define COLITER_NEXT(iter) iter.words[*iter.line_start++ + iter.col]
+#define COLITER_NEXT(iter, word) do { \
+    const int i = *iter.line_start++ + iter.col; \
+    word = i < *iter.line_start ? iter.words[i]: ""; \
+    } while(0)
 
-parser_t* parser_new();
+parser_t* parser_new(void);
 
 int parser_init(parser_t *self);
 
@@ -239,6 +242,8 @@ int parser_consume_rows(parser_t *self, size_t nrows);
 int parser_trim_buffers(parser_t *self);
 
 int parser_add_skiprow(parser_t *self, int64_t row);
+
+int parser_set_skipfirstnrows(parser_t *self, int64_t nrows);
 
 void parser_free(parser_t *self);
 
@@ -256,18 +261,18 @@ int tokenize_all_rows(parser_t *self);
   token stream
 
  */
-int clear_parsed_lines(parser_t *self, size_t nlines);
+//int clear_parsed_lines(parser_t *self, size_t nlines);
 
 int64_t str_to_int64(const char *p_item, int64_t int_min,
                      int64_t int_max, int *error, char tsep);
-uint64_t str_to_uint64(const char *p_item, uint64_t uint_max, int *error);
+//uint64_t str_to_uint64(const char *p_item, uint64_t uint_max, int *error);
 
 double xstrtod(const char *p, char **q, char decimal, char sci, char tsep, int skip_trailing);
 double precise_xstrtod(const char *p, char **q, char decimal, char sci, char tsep, int skip_trailing);
 double round_trip(const char *p, char **q, char decimal, char sci, char tsep, int skip_trailing);
-int P_INLINE to_complex(char *item, double *p_real, double *p_imag, char sci, char decimal);
+//int P_INLINE to_complex(char *item, double *p_real, double *p_imag, char sci, char decimal);
 int P_INLINE to_longlong(char *item, long long *p_value);
-int P_INLINE to_longlong_thousands(char *item, long long *p_value, char tsep);
-int P_INLINE to_boolean(char *item, uint8_t *val);
+//int P_INLINE to_longlong_thousands(char *item, long long *p_value, char tsep);
+int to_boolean(const char *item, uint8_t *val);
 
 #endif // _PARSER_COMMON_H_

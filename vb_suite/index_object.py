@@ -138,6 +138,17 @@ multiindex_with_datetime_level_sliced = \
               name='multiindex_with_datetime_level_sliced',
               start_date=datetime(2014, 10, 11))
 
+# multi-index duplicated
+setup = common_setup + """
+n, k = 200, 5000
+levels = [np.arange(n), tm.makeStringIndex(n).values, 1000 + np.arange(n)]
+labels = [np.random.choice(n, k * n) for lev in levels]
+mi = MultiIndex(levels=levels, labels=labels)
+"""
+
+multiindex_duplicated = Benchmark('mi.duplicated()', setup,
+                                  name='multiindex_duplicated')
+
 #----------------------------------------------------------------------
 # repr
 
@@ -148,3 +159,15 @@ dr = pd.date_range('20000101', freq='D', periods=100000)
 datetime_index_repr = \
     Benchmark("dr._is_dates_only", setup,
               start_date=datetime(2012, 1, 11))
+
+setup = common_setup + """
+n = 3 * 5 * 7 * 11 * (1 << 10)
+low, high = - 1 << 12, 1 << 12
+f = lambda k: np.repeat(np.random.randint(low, high, n // k), k)
+
+i = np.random.permutation(n)
+mi = MultiIndex.from_arrays([f(11), f(7), f(5), f(3), f(1)])[i]
+"""
+
+multiindex_sortlevel_int64 = Benchmark('mi.sortlevel()', setup,
+                                       name='multiindex_sortlevel_int64')

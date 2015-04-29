@@ -22,6 +22,7 @@ matrix:
       - LOCALE_OVERRIDE="it_IT.UTF-8"
       - BUILD_TYPE=conda
       - JOB_NAME: "26_nslow_nnet"
+      - INSTALL_TEST=true
     - python: 2.7
       env:
       - NOSE_ARGS="slow and not network and not disabled"
@@ -36,8 +37,33 @@ matrix:
       - FULL_DEPS=true
       - CLIPBOARD_GUI=gtk2
       - BUILD_TYPE=conda
+      - JOB_NAME: "27_build_test"
+      - JOB_TAG=_BUILD_TEST
+      - BUILD_TEST=true
+    - python: 2.7
+      env:
+      - NOSE_ARGS="not slow and not disabled"
+      - FULL_DEPS=true
+      - CLIPBOARD_GUI=gtk2
+      - BUILD_TYPE=pydata
+      - JOB_NAME: "27_build_test"
+      - JOB_TAG=_BUILD_TEST
+      - BUILD_TEST=true
+    - python: 2.7
+      env:
+      - NOSE_ARGS="not slow and not disabled"
+      - FULL_DEPS=true
+      - CLIPBOARD_GUI=gtk2
+      - BUILD_TYPE=conda
       - JOB_NAME: "27_nslow"
       - DOC_BUILD=true # if rst files were changed, build docs in parallel with tests
+    - python: 2.7
+      env:
+      - NOSE_ARGS="slow and not network and not disabled"
+      - FULL_DEPS=true
+      - JOB_TAG=_SLOW
+      - BUILD_TYPE=conda
+      - JOB_NAME: "27_slow"
     - python: 3.3
       env:
       - NOSE_ARGS="not slow and not disabled"
@@ -52,6 +78,14 @@ matrix:
       - CLIPBOARD=xsel
       - BUILD_TYPE=conda
       - JOB_NAME: "34_nslow"
+    - python: 3.4
+      env:
+      - NOSE_ARGS="slow and not network and not disabled"
+      - FULL_DEPS=true
+      - JOB_TAG=_SLOW
+      - CLIPBOARD=xsel
+      - BUILD_TYPE=conda
+      - JOB_NAME: "34_slow"
     - python: 3.2
       env:
       - NOSE_ARGS="not slow and not network and not disabled"
@@ -78,6 +112,21 @@ matrix:
         - JOB_NAME: "32_nslow"
       - python: 2.7
         env:
+        - NOSE_ARGS="slow and not network and not disabled"
+        - FULL_DEPS=true
+        - JOB_TAG=_SLOW
+        - BUILD_TYPE=conda
+        - JOB_NAME: "27_slow"
+      - python: 3.4
+        env:
+        - NOSE_ARGS="slow and not network and not disabled"
+        - FULL_DEPS=true
+        - JOB_TAG=_SLOW
+        - CLIPBOARD=xsel
+        - BUILD_TYPE=conda
+        - JOB_NAME: "34_slow"
+      - python: 2.7
+        env:
         - EXPERIMENTAL=true
         - NOSE_ARGS="not slow and not network and not disabled"
         - JOB_NAME: "27_numpy_master"
@@ -85,6 +134,24 @@ matrix:
         - NUMPY_BUILD=master
         - BUILD_TYPE=pydata
         - PANDAS_TESTING_MODE="deprecate"
+      - python: 2.7
+        env:
+        - NOSE_ARGS="not slow and not disabled"
+        - FULL_DEPS=true
+        - CLIPBOARD_GUI=gtk2
+        - BUILD_TYPE=conda
+        - JOB_NAME: "27_build_test"
+        - JOB_TAG=_BUILD_TEST
+        - BUILD_TEST=true
+      - python: 2.7
+        env:
+        - NOSE_ARGS="not slow and not disabled"
+        - FULL_DEPS=true
+        - CLIPBOARD_GUI=gtk2
+        - BUILD_TYPE=pydata
+        - JOB_NAME: "27_build_test"
+        - JOB_TAG=_BUILD_TEST
+        - BUILD_TEST=true
 
 before_install:
   - echo "before_install"
@@ -117,6 +184,7 @@ script:
 # nothing here, or failed tests won't fail travis
 
 after_script:
+  - ci/install_test.sh
   - if [ -f /tmp/doc.log ]; then cat /tmp/doc.log; fi
   - source activate pandas && ci/print_versions.py
   - ci/print_skipped.py /tmp/nosetests.xml

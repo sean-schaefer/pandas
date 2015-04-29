@@ -81,7 +81,8 @@ def _create_methods(arith_method, radd_func, comp_method, bool_method,
         rpow=arith_method(lambda x, y: y ** x, names('rpow'), op('**'),
                           default_axis=default_axis, reversed=True),
         rmod=arith_method(lambda x, y: y % x, names('rmod'), op('%'),
-                          default_axis=default_axis, reversed=True),
+                          default_axis=default_axis, fill_zeros=np.nan,
+                          reversed=True),
     )
     new_methods['div'] = new_methods['truediv']
     new_methods['rdiv'] = new_methods['rtruediv']
@@ -541,10 +542,13 @@ def _comp_method_SERIES(op, name, str_rep, masker=False):
     """
     def na_op(x, y):
 
-        if com.is_categorical_dtype(x) != (not np.isscalar(y) and com.is_categorical_dtype(y)):
-            msg = "Cannot compare a Categorical for op {op} with type {typ}. If you want to \n" \
-                  "compare values, use 'series <op> np.asarray(cat)'."
-            raise TypeError(msg.format(op=op,typ=type(y)))
+        # dispatch to the categorical if we have a categorical
+        # in either operand
+        if com.is_categorical_dtype(x):
+            return op(x,y)
+        elif com.is_categorical_dtype(y) and not lib.isscalar(y):
+            return op(y,x)
+
         if x.dtype == np.object_:
             if isinstance(y, list):
                 y = lib.list_to_object_array(y)
@@ -567,7 +571,11 @@ def _comp_method_SERIES(op, name, str_rep, masker=False):
 
         return result
 
-    def wrapper(self, other):
+    def wrapper(self, other, axis=None):
+        # Validate the axis parameter
+        if axis is not None:
+            self._get_axis_number(axis)
+
         if isinstance(other, pd.Series):
             name = _maybe_match_name(self, other)
             if len(self) != len(other):
@@ -586,10 +594,16 @@ def _comp_method_SERIES(op, name, str_rep, masker=False):
                 msg = "Cannot compare a Categorical for op {op} with Series of dtype {typ}.\n"\
                       "If you want to compare values, use 'series <op> np.asarray(other)'."
                 raise TypeError(msg.format(op=op,typ=self.dtype))
+
+
+        mask = isnull(self)
+
+        if com.is_categorical_dtype(self):
+            # cats are a special case as get_values() would return an ndarray, which would then
+            # not take categories ordering into account
+            # we can go directly to op, as the na_op would just test again and dispatch to it.
+            res = op(self.values, other)
         else:
-
-            mask = isnull(self)
-
             values = self.get_values()
             other = _index.convert_scalar(values,_values_from_object(other))
 
@@ -605,14 +619,14 @@ def _comp_method_SERIES(op, name, str_rep, masker=False):
             # always return a full value series here
             res = _values_from_object(res)
 
-            res = pd.Series(res, index=self.index, name=self.name,
-                            dtype='bool')
+        res = pd.Series(res, index=self.index, name=self.name,
+                        dtype='bool')
 
-            # mask out the invalids
-            if mask.any():
-                res[mask] = masker
+        # mask out the invalids
+        if mask.any():
+            res[mask] = masker
 
-            return res
+        return res
     return wrapper
 
 
@@ -651,20 +665,31 @@ def _bool_method_SERIES(op, name, str_rep):
         return result
 
     def wrapper(self, other):
+        is_self_int_dtype = com.is_integer_dtype(self.dtype)
+
+        fill_int = lambda x: x.fillna(0)
+        fill_bool = lambda x: x.fillna(False).astype(bool)
+
         if isinstance(other, pd.Series):
             name = _maybe_match_name(self, other)
+            other = other.reindex_like(self)
+            is_other_int_dtype = com.is_integer_dtype(other.dtype)
+            other = fill_int(other) if is_other_int_dtype else fill_bool(other)
 
-            other = other.reindex_like(self).fillna(False).astype(bool)
-            return self._constructor(na_op(self.values, other.values),
+            filler = fill_int if is_self_int_dtype and is_other_int_dtype else fill_bool
+            return filler(self._constructor(na_op(self.values, other.values),
                                      index=self.index,
-                                     name=name).fillna(False).astype(bool)
+                                     name=name))
+
         elif isinstance(other, pd.DataFrame):
             return NotImplemented
+
         else:
-            # scalars
-            res = self._constructor(na_op(self.values, other),
-                                    index=self.index).fillna(False)
-            return res.astype(bool).__finalize__(self)
+            # scalars, list, tuple, np.array
+            filler = fill_int if is_self_int_dtype and com.is_integer_dtype(np.asarray(other)) else fill_bool
+            return filler(self._constructor(na_op(self.values, other),
+                                    index=self.index)).__finalize__(self)
+
     return wrapper
 
 

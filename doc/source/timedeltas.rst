@@ -29,13 +29,13 @@ Time Deltas
    Starting in v0.15.0, we introduce a new scalar type ``Timedelta``, which is a subclass of ``datetime.timedelta``, and behaves in a similar manner,
    but allows compatibility with ``np.timedelta64`` types as well as a host of custom representation, parsing, and attributes.
 
-Timedeltas are differences in times, expressed in difference units, e.g. days,hours,minutes,seconds.
+Timedeltas are differences in times, expressed in difference units, e.g. days, hours, minutes, seconds.
 They can be both positive and negative.
 
 Parsing
 -------
 
-You can construct a ``Timedelta`` scalar thru various arguments:
+You can construct a ``Timedelta`` scalar through various arguments:
 
 .. ipython:: python
 
@@ -46,7 +46,7 @@ You can construct a ``Timedelta`` scalar thru various arguments:
    Timedelta('-1 days 2 min 3us')
 
    # like datetime.timedelta
-   # note: these MUST be specified as keyword argments
+   # note: these MUST be specified as keyword arguments
    Timedelta(days=1,seconds=1)
 
    # integers with a unit
@@ -100,7 +100,7 @@ It will construct Series if the input is a Series, a scalar if the input is scal
 Operations
 ----------
 
-You can operate on Series/DataFrames and construct ``timedelta64[ns]`` Series thru
+You can operate on Series/DataFrames and construct ``timedelta64[ns]`` Series through
 subtraction operations on ``datetime64[ns]`` Series, or ``Timestamps``.
 
 .. ipython:: python
@@ -251,8 +251,13 @@ yields another ``timedelta64[ns]`` dtypes Series.
 Attributes
 ----------
 
-You can access various components of the ``Timedelta`` or ``TimedeltaIndex`` directly using the attributes ``days,hours,minutes,seconds,milliseconds,microseconds,nanoseconds``.
-These operations can be directly accessed via the ``.dt`` property of the ``Series`` as well. These return an integer representing that interval (which is signed according to whether the ``Timedelta`` is signed).
+You can access various components of the ``Timedelta`` or ``TimedeltaIndex`` directly using the attributes ``days,seconds,microseconds,nanoseconds``. These are identical to the values returned by ``datetime.timedelta``, in that, for example, the ``.seconds`` attribute represents the number of seconds >= 0 and < 1 day. These are signed according to whether the ``Timedelta`` is signed.
+
+These operations can also be directly accessed via the ``.dt`` property of the ``Series`` as well.
+
+.. note::
+
+   Note that the attributes are NOT the displayed values of the ``Timedelta``. Use ``.components`` to retrieve the displayed values.
 
 For a ``Series``
 
@@ -261,7 +266,7 @@ For a ``Series``
    td.dt.days
    td.dt.seconds
 
-You can access the component field for a scalar ``Timedelta`` directly.
+You can access the value of the fields for a scalar ``Timedelta`` directly.
 
 .. ipython:: python
 
@@ -271,29 +276,12 @@ You can access the component field for a scalar ``Timedelta`` directly.
    (-tds).seconds
 
 You can use the ``.components`` property to access a reduced form of the timedelta. This returns a ``DataFrame`` indexed
-similarly to the ``Series``
+similarly to the ``Series``. These are the *displayed* values of the ``Timedelta``.
 
 .. ipython:: python
 
    td.dt.components
-
-.. _timedeltas.attribues_warn:
-
-.. warning::
-
-   ``Timedelta`` scalars (and ``TimedeltaIndex``) component fields are *not the same* as the component fields on a ``datetime.timedelta`` object. For example, ``.seconds`` on a ``datetime.timedelta`` object returns the total number of seconds combined between ``hours``, ``minutes`` and ``seconds``. In contrast, the pandas ``Timedelta`` breaks out hours, minutes, microseconds and nanoseconds separately.
-
-   .. ipython:: python
-
-      # Timedelta accessor
-      tds = Timedelta('31 days 5 min 3 sec')
-      tds.minutes
-      tds.seconds
-
-      # datetime.timedelta accessor
-      # this is 5 minutes * 60 + 3 seconds
-      tds.to_pytimedelta().seconds
-
+   td.dt.components.seconds
 
 .. _timedeltas.index:
 
@@ -302,7 +290,7 @@ TimedeltaIndex
 
 .. versionadded:: 0.15.0
 
-To generate an index with time delta, you can use either the TimedeltaIndex or
+To generate an index with time delta, you can use either the ``TimedeltaIndex`` or
 the ``timedelta_range`` constructor.
 
 Using ``TimedeltaIndex`` you can pass string-like, ``Timedelta``, ``timedelta``,

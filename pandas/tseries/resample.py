@@ -373,11 +373,11 @@ def _take_new_index(obj, indexer, new_index, axis=0):
         return Series(new_values, index=new_index, name=obj.name)
     elif isinstance(obj, DataFrame):
         if axis == 1:
-            raise NotImplementedError
+            raise NotImplementedError("axis 1 is not supported")
         return DataFrame(obj._data.reindex_indexer(
             new_axis=new_index, indexer=indexer, axis=1))
     else:
-        raise NotImplementedError
+        raise ValueError("'obj' should be either a Series or a DataFrame")
 
 
 def _get_range_edges(first, last, offset, closed='left', base=0):
@@ -395,8 +395,8 @@ def _get_range_edges(first, last, offset, closed='left', base=0):
 
     if not isinstance(offset, Tick):  # and first.time() != last.time():
         # hack!
-        first = tools.normalize_date(first)
-        last = tools.normalize_date(last)
+        first = first.normalize()
+        last = last.normalize()
 
     if closed == 'left':
         first = Timestamp(offset.rollback(first))
@@ -409,17 +409,24 @@ def _get_range_edges(first, last, offset, closed='left', base=0):
 
 
 def _adjust_dates_anchored(first, last, offset, closed='right', base=0):
-    from pandas.tseries.tools import normalize_date
+#     from pandas.tseries.tools import normalize_date
 
-    start_day_nanos = Timestamp(normalize_date(first)).value
-    last_day_nanos = Timestamp(normalize_date(last)).value
+    # First and last offsets should be calculated from the start day to fix an
+    # error cause by resampling across multiple days when a one day period is
+    # not a multiple of the frequency.
+    #
+    # See https://github.com/pydata/pandas/issues/8683
+
+    first_tzinfo = first.tzinfo
+    first = first.tz_localize(None)
+    last = last.tz_localize(None)
+    start_day_nanos = first.normalize().value
 
     base_nanos = (base % offset.n) * offset.nanos // offset.n
     start_day_nanos += base_nanos
-    last_day_nanos += base_nanos
 
     foffset = (first.value - start_day_nanos) % offset.nanos
-    loffset = (last.value - last_day_nanos) % offset.nanos
+    loffset = (last.value - start_day_nanos) % offset.nanos
 
     if closed == 'right':
         if foffset > 0:
@@ -447,8 +454,11 @@ def _adjust_dates_anchored(first, last, offset, closed='right', base=0):
         else:
             lresult = last.value + offset.nanos
 
-    return (Timestamp(fresult, tz=first.tz),
-            Timestamp(lresult, tz=last.tz))
+#     return (Timestamp(fresult, tz=first.tz),
+#             Timestamp(lresult, tz=last.tz))
+
+    return (Timestamp(fresult).tz_localize(first_tzinfo),
+            Timestamp(lresult).tz_localize(first_tzinfo))
 
 
 def asfreq(obj, freq, method=None, how=None, normalize=False):
@@ -457,7 +467,7 @@ def asfreq(obj, freq, method=None, how=None, normalize=False):
     """
     if isinstance(obj.index, PeriodIndex):
         if method is not None:
-            raise NotImplementedError
+            raise NotImplementedError("'method' argument is not supported")
 
         if how is None:
             how = 'E'
@@ -470,6 +480,7 @@ def asfreq(obj, freq, method=None, how=None, normalize=False):
         if len(obj.index) == 0:
             return obj.copy()
         dti = date_range(obj.index[0], obj.index[-1], freq=freq)
+        dti.name = obj.index.name
         rs = obj.reindex(dti, method=method)
         if normalize:
             rs.index = rs.index.normalize()

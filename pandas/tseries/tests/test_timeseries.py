@@ -1,4 +1,5 @@
 # pylint: disable-msg=E1101,W0612
+import calendar
 from datetime import datetime, time, timedelta
 import sys
 import operator
@@ -197,7 +198,6 @@ class TestTimeSeriesDuplicates(tm.TestCase):
             _index._SIZE_CUTOFF = old_cutoff
 
     def test_indexing_unordered(self):
-
         # GH 2437
         rng = date_range(start='2011-01-01', end='2011-01-15')
         ts  = Series(randn(len(rng)), index=rng)
@@ -411,20 +411,20 @@ class TestTimeSeries(tm.TestCase):
 
         stamp = rng[0]
         dtval = stamp.to_pydatetime()
-        self.assertEquals(stamp, dtval)
-        self.assertEquals(stamp.tzinfo, dtval.tzinfo)
+        self.assertEqual(stamp, dtval)
+        self.assertEqual(stamp.tzinfo, dtval.tzinfo)
 
     def test_timestamp_to_datetime_explicit_dateutil(self):
         _skip_if_windows_python_3()
         tm._skip_if_no_dateutil()
         import dateutil
         rng = date_range('20090415', '20090519',
-                         tz=dateutil.tz.gettz('US/Eastern'))
+                         tz=dateutil.zoneinfo.gettz('US/Eastern'))
 
         stamp = rng[0]
         dtval = stamp.to_pydatetime()
-        self.assertEquals(stamp, dtval)
-        self.assertEquals(stamp.tzinfo, dtval.tzinfo)
+        self.assertEqual(stamp, dtval)
+        self.assertEqual(stamp.tzinfo, dtval.tzinfo)
 
     def test_index_convert_to_datetime_array(self):
         tm._skip_if_no_pytz()
@@ -454,8 +454,8 @@ class TestTimeSeries(tm.TestCase):
             tm.assert_isinstance(converted, np.ndarray)
             for x, stamp in zip(converted, rng):
                 tm.assert_isinstance(x, datetime)
-                self.assertEquals(x, stamp.to_pydatetime())
-                self.assertEquals(x.tzinfo, stamp.tzinfo)
+                self.assertEqual(x, stamp.to_pydatetime())
+                self.assertEqual(x.tzinfo, stamp.tzinfo)
 
         rng = date_range('20090415', '20090519')
         rng_eastern = date_range('20090415', '20090519', tz=pytz.timezone('US/Eastern'))
@@ -474,8 +474,8 @@ class TestTimeSeries(tm.TestCase):
             tm.assert_isinstance(converted, np.ndarray)
             for x, stamp in zip(converted, rng):
                 tm.assert_isinstance(x, datetime)
-                self.assertEquals(x, stamp.to_pydatetime())
-                self.assertEquals(x.tzinfo, stamp.tzinfo)
+                self.assertEqual(x, stamp.to_pydatetime())
+                self.assertEqual(x.tzinfo, stamp.tzinfo)
 
         rng = date_range('20090415', '20090519')
         rng_eastern = date_range('20090415', '20090519', tz='dateutil/US/Eastern')
@@ -660,7 +660,8 @@ class TestTimeSeries(tm.TestCase):
     def test_pad_require_monotonicity(self):
         rng = date_range('1/1/2000', '3/1/2000', freq='B')
 
-        rng2 = rng[::2][::-1]
+        # neither monotonic increasing or decreasing
+        rng2 = rng[[1, 0, 2]]
 
         self.assertRaises(ValueError, rng2.get_indexer, rng,
                           method='pad')
@@ -936,7 +937,7 @@ class TestTimeSeries(tm.TestCase):
 
         fields = ['year', 'quarter', 'month', 'day', 'hour',
                   'minute', 'second', 'microsecond', 'nanosecond',
-                  'week', 'dayofyear']
+                  'week', 'dayofyear', 'days_in_month']
         for field in fields:
             result = getattr(idx, field)
             expected = [getattr(x, field) if x is not NaT else np.nan
@@ -946,7 +947,7 @@ class TestTimeSeries(tm.TestCase):
     def test_nat_scalar_field_access(self):
         fields = ['year', 'quarter', 'month', 'day', 'hour',
                   'minute', 'second', 'microsecond', 'nanosecond',
-                  'week', 'dayofyear']
+                  'week', 'dayofyear', 'days_in_month']
         for field in fields:
             result = getattr(NaT, field)
             self.assertTrue(np.isnan(result))
@@ -1129,6 +1130,15 @@ class TestTimeSeries(tm.TestCase):
 
         result = ts[list(ts.index[5:10])]
         tm.assert_series_equal(result, expected)
+
+    def test_asfreq_keep_index_name(self):
+        # GH #9854
+        index_name = 'bar'
+        index = pd.date_range('20130101',periods=20,name=index_name)
+        df = pd.DataFrame([x for x in range(20)],columns=['foo'],index=index)
+
+        tm.assert_equal(index_name, df.index.name)
+        tm.assert_equal(index_name, df.asfreq('10D').index.name)
 
     def test_promote_datetime_date(self):
         rng = date_range('1/1/2000', periods=20)
@@ -1542,24 +1552,24 @@ class TestTimeSeries(tm.TestCase):
         result = ts.to_period()[0]
         expected = ts[0].to_period()
 
-        self.assert_(result == expected)
-        self.assert_(ts.to_period().equals(xp))
+        self.assertTrue(result == expected)
+        self.assertTrue(ts.to_period().equals(xp))
 
         ts = date_range('1/1/2000', '4/1/2000', tz=pytz.utc)
 
         result = ts.to_period()[0]
         expected = ts[0].to_period()
 
-        self.assert_(result == expected)
-        self.assert_(ts.to_period().equals(xp))
+        self.assertTrue(result == expected)
+        self.assertTrue(ts.to_period().equals(xp))
 
         ts = date_range('1/1/2000', '4/1/2000', tz=tzlocal())
 
         result = ts.to_period()[0]
         expected = ts[0].to_period()
 
-        self.assert_(result == expected)
-        self.assert_(ts.to_period().equals(xp))
+        self.assertTrue(result == expected)
+        self.assertTrue(ts.to_period().equals(xp))
 
     def test_to_period_tz_dateutil(self):
         tm._skip_if_no_dateutil()
@@ -1573,24 +1583,24 @@ class TestTimeSeries(tm.TestCase):
         result = ts.to_period()[0]
         expected = ts[0].to_period()
 
-        self.assert_(result == expected)
-        self.assert_(ts.to_period().equals(xp))
+        self.assertTrue(result == expected)
+        self.assertTrue(ts.to_period().equals(xp))
 
         ts = date_range('1/1/2000', '4/1/2000', tz=dateutil.tz.tzutc())
 
         result = ts.to_period()[0]
         expected = ts[0].to_period()
 
-        self.assert_(result == expected)
-        self.assert_(ts.to_period().equals(xp))
+        self.assertTrue(result == expected)
+        self.assertTrue(ts.to_period().equals(xp))
 
         ts = date_range('1/1/2000', '4/1/2000', tz=tzlocal())
 
         result = ts.to_period()[0]
         expected = ts[0].to_period()
 
-        self.assert_(result == expected)
-        self.assert_(ts.to_period().equals(xp))
+        self.assertTrue(result == expected)
+        self.assertTrue(ts.to_period().equals(xp))
 
     def test_frame_to_period(self):
         K = 5
@@ -1624,7 +1634,7 @@ class TestTimeSeries(tm.TestCase):
         # extra fields from DatetimeIndex like quarter and week
         idx = tm.makeDateIndex(100)
 
-        fields = ['dayofweek', 'dayofyear', 'week', 'weekofyear', 'quarter', 'is_month_start', 'is_month_end', 'is_quarter_start', 'is_quarter_end', 'is_year_start', 'is_year_end']
+        fields = ['dayofweek', 'dayofyear', 'week', 'weekofyear', 'quarter', 'days_in_month', 'is_month_start', 'is_month_end', 'is_quarter_start', 'is_quarter_end', 'is_year_start', 'is_year_end']
         for f in fields:
             expected = getattr(idx, f)[-1]
             result = getattr(Timestamp(idx[-1]), f)
@@ -1788,16 +1798,16 @@ class TestTimeSeries(tm.TestCase):
 
         result = ts.append(ts2)
         result_df = df.append(df2)
-        self.assert_(result.index.equals(rng3))
-        self.assert_(result_df.index.equals(rng3))
+        self.assertTrue(result.index.equals(rng3))
+        self.assertTrue(result_df.index.equals(rng3))
 
         appended = rng.append(rng2)
-        self.assert_(appended.equals(rng3))
+        self.assertTrue(appended.equals(rng3))
 
     def test_append_concat_tz_dateutil(self):
         # GH 2938
         tm._skip_if_no_dateutil()
-        from dateutil.tz import gettz as timezone
+        from dateutil.zoneinfo import gettz as timezone
 
         rng = date_range('5/8/2012 1:45', periods=10, freq='5T',
                          tz='dateutil/US/Eastern')
@@ -1812,11 +1822,11 @@ class TestTimeSeries(tm.TestCase):
 
         result = ts.append(ts2)
         result_df = df.append(df2)
-        self.assert_(result.index.equals(rng3))
-        self.assert_(result_df.index.equals(rng3))
+        self.assertTrue(result.index.equals(rng3))
+        self.assertTrue(result_df.index.equals(rng3))
 
         appended = rng.append(rng2)
-        self.assert_(appended.equals(rng3))
+        self.assertTrue(appended.equals(rng3))
 
     def test_set_dataframe_column_ns_dtype(self):
         x = DataFrame([datetime.now(), datetime.now()])
@@ -2313,6 +2323,37 @@ class TestDatetimeIndex(tm.TestCase):
         exp = [f(x) for x in rng]
         self.assert_numpy_array_equal(result, exp)
 
+
+    def test_iteration_preserves_tz(self):
+
+        tm._skip_if_no_dateutil()
+
+        # GH 8890
+        import dateutil
+        index = date_range("2012-01-01", periods=3, freq='H', tz='US/Eastern')
+
+        for i, ts in enumerate(index):
+            result = ts
+            expected = index[i]
+            self.assertEqual(result, expected)
+
+        index = date_range("2012-01-01", periods=3, freq='H', tz=dateutil.tz.tzoffset(None, -28800))
+
+        for i, ts in enumerate(index):
+            result = ts
+            expected = index[i]
+            self.assertEqual(result._repr_base, expected._repr_base)
+            self.assertEqual(result, expected)
+
+        # 9100
+        index = pd.DatetimeIndex(['2014-12-01 03:32:39.987000-08:00','2014-12-01 04:12:34.987000-08:00'])
+        for i, ts in enumerate(index):
+            result = ts
+            expected = index[i]
+            self.assertEqual(result._repr_base, expected._repr_base)
+            self.assertEqual(result, expected)
+
+
     def test_misc_coverage(self):
         rng = date_range('1/1/2000', periods=5)
         result = rng.groupby(rng.day)
@@ -2766,6 +2807,41 @@ class TestDatetimeIndex(tm.TestCase):
         self.assertTrue(idx.equals(idx3))
 
 
+    def test_slice_with_negative_step(self):
+        ts = Series(np.arange(20),
+                    date_range('2014-01-01', periods=20, freq='MS'))
+        SLC = pd.IndexSlice
+
+        def assert_slices_equivalent(l_slc, i_slc):
+            assert_series_equal(ts[l_slc], ts.iloc[i_slc])
+            assert_series_equal(ts.loc[l_slc], ts.iloc[i_slc])
+            assert_series_equal(ts.ix[l_slc], ts.iloc[i_slc])
+
+        assert_slices_equivalent(SLC[Timestamp('2014-10-01')::-1], SLC[9::-1])
+        assert_slices_equivalent(SLC['2014-10-01'::-1], SLC[9::-1])
+
+        assert_slices_equivalent(SLC[:Timestamp('2014-10-01'):-1], SLC[:8:-1])
+        assert_slices_equivalent(SLC[:'2014-10-01':-1], SLC[:8:-1])
+
+        assert_slices_equivalent(SLC['2015-02-01':'2014-10-01':-1], SLC[13:8:-1])
+        assert_slices_equivalent(SLC[Timestamp('2015-02-01'):Timestamp('2014-10-01'):-1], SLC[13:8:-1])
+        assert_slices_equivalent(SLC['2015-02-01':Timestamp('2014-10-01'):-1], SLC[13:8:-1])
+        assert_slices_equivalent(SLC[Timestamp('2015-02-01'):'2014-10-01':-1], SLC[13:8:-1])
+
+        assert_slices_equivalent(SLC['2014-10-01':'2015-02-01':-1], SLC[:0])
+
+    def test_slice_with_zero_step_raises(self):
+        ts = Series(np.arange(20),
+                    date_range('2014-01-01', periods=20, freq='MS'))
+        self.assertRaisesRegexp(ValueError, 'slice step cannot be zero',
+                                lambda: ts[::0])
+        self.assertRaisesRegexp(ValueError, 'slice step cannot be zero',
+                                lambda: ts.loc[::0])
+        self.assertRaisesRegexp(ValueError, 'slice step cannot be zero',
+                                lambda: ts.ix[::0])
+
+
+
 class TestDatetime64(tm.TestCase):
     """
     Also test support for datetime64[ns] in Series / DataFrame
@@ -2797,6 +2873,9 @@ class TestDatetime64(tm.TestCase):
 
         self.assertEqual(dti.quarter[0], 1)
         self.assertEqual(dti.quarter[120], 2)
+
+        self.assertEqual(dti.days_in_month[0], 31)
+        self.assertEqual(dti.days_in_month[90], 30)
 
         self.assertEqual(dti.is_month_start[0], True)
         self.assertEqual(dti.is_month_start[1], False)
@@ -2881,7 +2960,9 @@ class TestDatetime64(tm.TestCase):
             (Timestamp('2013-06-28', offset='BQS-APR').is_quarter_end, 1),
             (Timestamp('2013-03-29', offset='BQS-APR').is_year_end, 1),
             (Timestamp('2013-11-01', offset='AS-NOV').is_year_start, 1),
-            (Timestamp('2013-10-31', offset='AS-NOV').is_year_end, 1)]
+            (Timestamp('2013-10-31', offset='AS-NOV').is_year_end, 1),
+            (Timestamp('2012-02-01').days_in_month, 29),
+            (Timestamp('2013-02-01').days_in_month, 28)]
 
         for ts, value in tests:
             self.assertEqual(ts, value)
@@ -3291,6 +3372,16 @@ class TestTimestamp(tm.TestCase):
         compare(Timestamp.now('UTC'), datetime.now(timezone('UTC')))
         compare(Timestamp.utcnow(), datetime.utcnow())
         compare(Timestamp.today(), datetime.today())
+        current_time = calendar.timegm(datetime.now().utctimetuple())
+        compare(Timestamp.utcfromtimestamp(current_time),
+                datetime.utcfromtimestamp(current_time))
+        compare(Timestamp.fromtimestamp(current_time),
+                datetime.fromtimestamp(current_time))
+
+        date_component = datetime.utcnow()
+        time_component = (date_component + timedelta(minutes=10)).time()
+        compare(Timestamp.combine(date_component, time_component),
+                datetime.combine(date_component, time_component))
 
     def test_class_ops_dateutil(self):
         tm._skip_if_no_dateutil()
@@ -3303,6 +3394,16 @@ class TestTimestamp(tm.TestCase):
         compare(Timestamp.now('UTC'), datetime.now(tzutc()))
         compare(Timestamp.utcnow(),datetime.utcnow())
         compare(Timestamp.today(),datetime.today())
+        current_time = calendar.timegm(datetime.now().utctimetuple())
+        compare(Timestamp.utcfromtimestamp(current_time),
+                datetime.utcfromtimestamp(current_time))
+        compare(Timestamp.fromtimestamp(current_time),
+                datetime.fromtimestamp(current_time))
+
+        date_component = datetime.utcnow()
+        time_component = (date_component + timedelta(minutes=10)).time()
+        compare(Timestamp.combine(date_component, time_component),
+                datetime.combine(date_component, time_component))
 
     def test_basics_nanos(self):
         val = np.int64(946684800000000000).view('M8[ns]')
@@ -3724,6 +3825,22 @@ class TestSlicing(tm.TestCase):
         self.assertEqual(s[Timestamp('2005-1-1 23:59:00')], s.ix[0])
         self.assertRaises(Exception, s.__getitem__, '2004-12-31 00:00:00')
 
+    def test_partial_slice_second_precision(self):
+        rng = DatetimeIndex(start=datetime(2005, 1, 1, 0, 0, 59,
+                                           microsecond=999990),
+                            periods=20, freq='US')
+        s = Series(np.arange(20), rng)
+
+        assert_series_equal(s['2005-1-1 00:00'], s.iloc[:10])
+        assert_series_equal(s['2005-1-1 00:00:59'], s.iloc[:10])
+
+        assert_series_equal(s['2005-1-1 00:01'], s.iloc[10:])
+        assert_series_equal(s['2005-1-1 00:01:00'], s.iloc[10:])
+
+        self.assertEqual(s[Timestamp('2005-1-1 00:00:59.999990')], s.iloc[0])
+        self.assertRaisesRegexp(KeyError, '2005-1-1 00:00:00',
+                                lambda: s['2005-1-1 00:00:00'])
+
     def test_partial_slicing_with_multiindex(self):
 
         # GH 4758
@@ -3934,6 +4051,24 @@ class TestSlicing(tm.TestCase):
         self.assertEqual(dr[0], Timestamp('2013-01-31'))
         self.assertEqual(dr[1], Timestamp('2014-01-30'))
 
+    def test_partial_slice_doesnt_require_monotonicity(self):
+        # For historical reasons.
+        s = pd.Series(np.arange(10),
+                      pd.date_range('2014-01-01', periods=10))
+
+        nonmonotonic = s[[3, 5, 4]]
+        expected = nonmonotonic.iloc[:0]
+        timestamp = pd.Timestamp('2014-01-10')
+
+        assert_series_equal(nonmonotonic['2014-01-10':], expected)
+        self.assertRaisesRegexp(KeyError, "Timestamp\('2014-01-10 00:00:00'\)",
+                                lambda: nonmonotonic[timestamp:])
+
+        assert_series_equal(nonmonotonic.ix['2014-01-10':], expected)
+        self.assertRaisesRegexp(KeyError, "Timestamp\('2014-01-10 00:00:00'\)",
+                                lambda: nonmonotonic.ix[timestamp:])
+
+
 class TimeConversionFormats(tm.TestCase):
     def test_to_datetime_format(self):
         values = ['1/1/2000', '1/2/2000', '1/3/2000']
@@ -4012,6 +4147,32 @@ class TimeConversionFormats(tm.TestCase):
             ]
         for s, format, dt in data:
             self.assertEqual(to_datetime(s, format=format), dt)
+
+    def test_to_datetime_with_non_exact(self):
+
+        # 8904
+        # exact kw
+        if sys.version_info < (2, 7):
+            raise nose.SkipTest('on python version < 2.7')
+
+        s = Series(['19MAY11','foobar19MAY11','19MAY11:00:00:00','19MAY11 00:00:00Z'])
+        result = to_datetime(s,format='%d%b%y',exact=False)
+        expected = to_datetime(s.str.extract('(\d+\w+\d+)'),format='%d%b%y')
+        assert_series_equal(result, expected)
+
+    def test_parse_nanoseconds_with_formula(self):
+
+        # GH8989
+        # trunctaing the nanoseconds when a format was provided
+        for v in ["2012-01-01 09:00:00.000000001",
+                  "2012-01-01 09:00:00.000001",
+                  "2012-01-01 09:00:00.001",
+                  "2012-01-01 09:00:00.001000",
+                  "2012-01-01 09:00:00.001000000",
+                  ]:
+            expected = pd.to_datetime(v)
+            result =  pd.to_datetime(v, format="%Y-%m-%d %H:%M:%S.%f")
+            self.assertEqual(result,expected)
 
     def test_to_datetime_format_weeks(self):
         data = [

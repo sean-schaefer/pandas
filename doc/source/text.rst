@@ -17,10 +17,10 @@ Working with Text Data
 
 .. _text.string_methods:
 
-Series is equipped with a set of string processing methods
+Series and Index are equipped with a set of string processing methods
 that make it easy to operate on each element of the array. Perhaps most
 importantly, these methods exclude missing/NA values automatically. These are
-accessed via the Series's ``str`` attribute and generally have names matching
+accessed via the ``str`` attribute and generally have names matching
 the equivalent (scalar) built-in string methods:
 
 .. ipython:: python
@@ -29,6 +29,39 @@ the equivalent (scalar) built-in string methods:
    s.str.lower()
    s.str.upper()
    s.str.len()
+
+.. ipython:: python
+
+   idx = Index([' jack', 'jill ', ' jesse ', 'frank'])
+   idx.str.strip()
+   idx.str.lstrip()
+   idx.str.rstrip()
+
+The string methods on Index are especially useful for cleaning up or
+transforming DataFrame columns. For instance, you may have columns with
+leading or trailing whitespace:
+
+.. ipython:: python
+
+   df = DataFrame(randn(3, 2), columns=[' Column A ', ' Column B '],
+                  index=range(3))
+   df
+
+Since ``df.columns`` is an Index object, we can use the ``.str`` accessor
+
+.. ipython:: python
+
+   df.columns.str.strip()
+   df.columns.str.lower()
+
+These string methods can then be used to clean up the columns as needed.
+Here we are removing leading and trailing whitespaces, lowercasing all names,
+and replacing any remaining whitespaces with underscores:
+
+.. ipython:: python
+
+   df.columns = df.columns.str.strip().str.lower().str.replace(' ', '_')
+   df
 
 Splitting and Replacing Strings
 -------------------------------
@@ -42,18 +75,18 @@ Methods like ``split`` return a Series of lists:
    s2 = Series(['a_b_c', 'c_d_e', np.nan, 'f_g_h'])
    s2.str.split('_')
 
-Easy to expand this to return a DataFrame
-
-.. ipython:: python
-
-   s2.str.split('_').apply(Series)
-
 Elements in the split lists can be accessed using ``get`` or ``[]`` notation:
 
 .. ipython:: python
 
    s2.str.split('_').str.get(1)
    s2.str.split('_').str[1]
+
+Easy to expand this to return a DataFrame using ``return_type``.
+
+.. ipython:: python
+
+   s2.str.split('_', return_type='frame')
 
 Methods like ``replace`` and ``findall`` take `regular expressions
 <https://docs.python.org/2/library/re.html>`__, too:
@@ -204,27 +237,43 @@ Method Summary
     :header: "Method", "Description"
     :widths: 20, 80
 
-    :meth:`~core.strings.StringMethods.cat`,Concatenate strings
-    :meth:`~core.strings.StringMethods.split`,Split strings on delimiter
-    :meth:`~core.strings.StringMethods.get`,Index into each element (retrieve i-th element)
-    :meth:`~core.strings.StringMethods.join`,Join strings in each element of the Series with passed separator
-    :meth:`~core.strings.StringMethods.contains`,Return boolean array if each string contains pattern/regex
-    :meth:`~core.strings.StringMethods.replace`,Replace occurrences of pattern/regex with some other string
-    :meth:`~core.strings.StringMethods.repeat`,Duplicate values (``s.str.repeat(3)`` equivalent to ``x * 3``)
-    :meth:`~core.strings.StringMethods.pad`,"Add whitespace to left, right, or both sides of strings"
-    :meth:`~core.strings.StringMethods.center`,Equivalent to ``pad(side='both')``
-    :meth:`~core.strings.StringMethods.wrap`,Split long strings into lines with length less than a given width
-    :meth:`~core.strings.StringMethods.slice`,Slice each string in the Series
-    :meth:`~core.strings.StringMethods.slice_replace`,Replace slice in each string with passed value
-    :meth:`~core.strings.StringMethods.count`,Count occurrences of pattern
-    :meth:`~core.strings.StringMethods.startswith`,Equivalent to ``str.startswith(pat)`` for each element
-    :meth:`~core.strings.StringMethods.endswith`,Equivalent to ``str.endswith(pat)`` for each element
-    :meth:`~core.strings.StringMethods.findall`,Compute list of all occurrences of pattern/regex for each string
-    :meth:`~core.strings.StringMethods.match`,"Call ``re.match`` on each element, returning matched groups as list"
-    :meth:`~core.strings.StringMethods.extract`,"Call ``re.match`` on each element, as ``match`` does, but return matched groups as strings for convenience."
-    :meth:`~core.strings.StringMethods.len`,Compute string lengths
-    :meth:`~core.strings.StringMethods.strip`,Equivalent to ``str.strip``
-    :meth:`~core.strings.StringMethods.rstrip`,Equivalent to ``str.rstrip``
-    :meth:`~core.strings.StringMethods.lstrip`,Equivalent to ``str.lstrip``
-    :meth:`~core.strings.StringMethods.lower`,Equivalent to ``str.lower``
-    :meth:`~core.strings.StringMethods.upper`,Equivalent to ``str.upper``
+    :meth:`~Series.str.cat`,Concatenate strings
+    :meth:`~Series.str.split`,Split strings on delimiter
+    :meth:`~Series.str.get`,Index into each element (retrieve i-th element)
+    :meth:`~Series.str.join`,Join strings in each element of the Series with passed separator
+    :meth:`~Series.str.contains`,Return boolean array if each string contains pattern/regex
+    :meth:`~Series.str.replace`,Replace occurrences of pattern/regex with some other string
+    :meth:`~Series.str.repeat`,Duplicate values (``s.str.repeat(3)`` equivalent to ``x * 3``)
+    :meth:`~Series.str.pad`,"Add whitespace to left, right, or both sides of strings"
+    :meth:`~Series.str.center`,Equivalent to ``str.center``
+    :meth:`~Series.str.ljust`,Equivalent to ``str.ljust``
+    :meth:`~Series.str.rjust`,Equivalent to ``str.rjust``
+    :meth:`~Series.str.zfill`,Equivalent to ``str.zfill``
+    :meth:`~Series.str.wrap`,Split long strings into lines with length less than a given width
+    :meth:`~Series.str.slice`,Slice each string in the Series
+    :meth:`~Series.str.slice_replace`,Replace slice in each string with passed value
+    :meth:`~Series.str.count`,Count occurrences of pattern
+    :meth:`~Series.str.startswith`,Equivalent to ``str.startswith(pat)`` for each element
+    :meth:`~Series.str.endswith`,Equivalent to ``str.endswith(pat)`` for each element
+    :meth:`~Series.str.findall`,Compute list of all occurrences of pattern/regex for each string
+    :meth:`~Series.str.match`,"Call ``re.match`` on each element, returning matched groups as list"
+    :meth:`~Series.str.extract`,"Call ``re.match`` on each element, as ``match`` does, but return matched groups as strings for convenience."
+    :meth:`~Series.str.len`,Compute string lengths
+    :meth:`~Series.str.strip`,Equivalent to ``str.strip``
+    :meth:`~Series.str.rstrip`,Equivalent to ``str.rstrip``
+    :meth:`~Series.str.lstrip`,Equivalent to ``str.lstrip``
+    :meth:`~Series.str.lower`,Equivalent to ``str.lower``
+    :meth:`~Series.str.upper`,Equivalent to ``str.upper``
+    :meth:`~Series.str.find`,Equivalent to ``str.find``
+    :meth:`~Series.str.rfind`,Equivalent to ``str.rfind``
+    :meth:`~Series.str.capitalize`,Equivalent to ``str.capitalize``
+    :meth:`~Series.str.swapcase`,Equivalent to ``str.swapcase``
+    :meth:`~Series.str.isalnum`,Equivalent to ``str.isalnum``
+    :meth:`~Series.str.isalpha`,Equivalent to ``str.isalpha``
+    :meth:`~Series.str.isdigit`,Equivalent to ``str.isdigit``
+    :meth:`~Series.str.isspace`,Equivalent to ``str.isspace``
+    :meth:`~Series.str.islower`,Equivalent to ``str.islower``
+    :meth:`~Series.str.isupper`,Equivalent to ``str.isupper``
+    :meth:`~Series.str.istitle`,Equivalent to ``str.istitle``
+    :meth:`~Series.str.isnumeric`,Equivalent to ``str.isnumeric``
+    :meth:`~Series.str.isdecimal`,Equivalent to ``str.isdecimal``

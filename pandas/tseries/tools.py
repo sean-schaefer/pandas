@@ -174,10 +174,10 @@ def _guess_datetime_format_for_array(arr, **kwargs):
         return _guess_datetime_format(arr[non_nan_elements[0]], **kwargs)
 
 def to_datetime(arg, errors='ignore', dayfirst=False, utc=None, box=True,
-                format=None, coerce=False, unit='ns',
+                format=None, exact=True, coerce=False, unit='ns',
                 infer_datetime_format=False):
     """
-    Convert argument to datetime
+    Convert argument to datetime.
 
     Parameters
     ----------
@@ -194,17 +194,32 @@ def to_datetime(arg, errors='ignore', dayfirst=False, utc=None, box=True,
     box : boolean, default True
         If True returns a DatetimeIndex, if False returns ndarray of values
     format : string, default None
-        strftime to parse time, eg "%d/%m/%Y"
+        strftime to parse time, eg "%d/%m/%Y", note that "%f" will parse
+        all the way up to nanoseconds
+    exact : boolean, True by default
+        If True, require an exact format match.
+        If False, allow the format to match anywhere in the target string.
     coerce : force errors to NaT (False by default)
+        Timestamps outside the interval between Timestamp.min and Timestamp.max
+        (approximately 1677-09-22 to 2262-04-11) will be also forced to NaT.
     unit : unit of the arg (D,s,ms,us,ns) denote the unit in epoch
         (e.g. a unix timestamp), which is an integer/float number
-    infer_datetime_format: boolean, default False
+    infer_datetime_format : boolean, default False
         If no `format` is given, try to infer the format based on the first
         datetime string. Provides a large speed-up in many cases.
 
     Returns
     -------
-    ret : datetime if parsing succeeded
+    ret : datetime if parsing succeeded.
+        Return type depends on input:
+
+        - list-like: DatetimeIndex
+        - Series: Series of datetime64 dtype
+        - scalar: Timestamp
+
+        In case when it is not possible to return designated types (e.g. when
+        any element of input is before Timestamp.min or after Timestamp.max)
+        return will have datetime.datetime type (or correspoding array/Series).
 
     Examples
     --------
@@ -214,11 +229,30 @@ def to_datetime(arg, errors='ignore', dayfirst=False, utc=None, box=True,
     >>> i = pd.date_range('20000101',periods=100)
     >>> df = pd.DataFrame(dict(year = i.year, month = i.month, day = i.day))
     >>> pd.to_datetime(df.year*10000 + df.month*100 + df.day, format='%Y%m%d')
+    0    2000-01-01
+    1    2000-01-02
+    ...
+    98   2000-04-08
+    99   2000-04-09
+    Length: 100, dtype: datetime64[ns]
 
     Or from strings
 
     >>> df = df.astype(str)
     >>> pd.to_datetime(df.day + df.month + df.year, format="%d%m%Y")
+    0    2000-01-01
+    1    2000-01-02
+    ...
+    98   2000-04-08
+    99   2000-04-09
+    Length: 100, dtype: datetime64[ns]
+
+    Date that does not meet timestamp limitations:
+
+    >>> pd.to_datetime('13000101', format='%Y%m%d')
+    datetime.datetime(1300, 1, 1, 0, 0)
+    >>> pd.to_datetime('13000101', format='%Y%m%d', coerce=True)
+    NaT
     """
     from pandas import Timestamp
     from pandas.core.series import Series
@@ -270,7 +304,7 @@ def to_datetime(arg, errors='ignore', dayfirst=False, utc=None, box=True,
                 if result is None:
                     try:
                         result = tslib.array_strptime(
-                            arg, format, coerce=coerce
+                            arg, format, exact=exact, coerce=coerce
                         )
                     except (tslib.OutOfBoundsDatetime):
                         if errors == 'raise':
@@ -352,10 +386,10 @@ def _attempt_YYYYMMDD(arg, coerce):
     return None
 
 # patterns for quarters like '4Q2005', '05Q1'
-qpat1full = re.compile(r'(\d)Q(\d\d\d\d)')
-qpat2full = re.compile(r'(\d\d\d\d)Q(\d)')
-qpat1 = re.compile(r'(\d)Q(\d\d)')
-qpat2 = re.compile(r'(\d\d)Q(\d)')
+qpat1full = re.compile(r'(\d)Q-?(\d\d\d\d)')
+qpat2full = re.compile(r'(\d\d\d\d)-?Q(\d)')
+qpat1 = re.compile(r'(\d)Q-?(\d\d)')
+qpat2 = re.compile(r'(\d\d)-?Q(\d)')
 ypat = re.compile(r'(\d\d\d\d)$')
 has_time = re.compile('(.+)([\s]|T)+(.+)')
 
@@ -393,18 +427,18 @@ def parse_time_string(arg, freq=None, dayfirst=None, yearfirst=None):
                                         second=0, microsecond=0)
 
     # special handling for possibilities eg, 2Q2005, 2Q05, 2005Q1, 05Q1
-    if len(arg) in [4, 6]:
+    if len(arg) in [4, 5, 6, 7]:
         m = ypat.match(arg)
         if m:
             ret = default.replace(year=int(m.group(1)))
             return ret, ret, 'year'
 
         add_century = False
-        if len(arg) == 4:
+        if len(arg) > 5:
+            qpats = [(qpat1full, 1), (qpat2full, 0)]
+        else:
             add_century = True
             qpats = [(qpat1, 1), (qpat2, 0)]
-        else:
-            qpats = [(qpat1full, 1), (qpat2full, 0)]
 
         for pat, yfirst in qpats:
             qparse = pat.match(arg)

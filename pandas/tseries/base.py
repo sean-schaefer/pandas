@@ -2,12 +2,13 @@
 Base and utility classes for tseries type pandas objects.
 """
 
-
+import warnings
 from datetime import datetime, time, timedelta
 
 from pandas import compat
 import numpy as np
 from pandas.core import common as com
+from pandas.core.common import is_integer, is_float, AbstractMethodError
 import pandas.tslib as tslib
 import pandas.lib as lib
 from pandas.core.index import Index
@@ -47,7 +48,7 @@ class DatetimeIndexOpsMixin(object):
         """
         box function to get object from internal representation
         """
-        raise NotImplementedError
+        raise AbstractMethodError(self)
 
     def _box_values(self, values):
         """
@@ -60,14 +61,21 @@ class DatetimeIndexOpsMixin(object):
         return _algos.groupby_object(objs, f)
 
     def _format_with_header(self, header, **kwargs):
-        return header + self._format_native_types(**kwargs)
+        return header + list(self._format_native_types(**kwargs))
 
     def __contains__(self, key):
         try:
             res = self.get_loc(key)
-            return np.isscalar(res) or type(res) == slice
-        except (KeyError, TypeError):
+            return np.isscalar(res) or type(res) == slice or np.any(res)
+        except (KeyError, TypeError, ValueError):
             return False
+
+    @property
+    def freqstr(self):
+        """ return the frequency object as a string if its set, otherwise None """
+        if self.freq is None:
+            return None
+        return self.freq.freqstr
 
     @cache_readonly
     def inferred_freq(self):
@@ -113,52 +121,6 @@ class DatetimeIndexOpsMixin(object):
         if isinstance(maybe_slice, slice):
             return self[maybe_slice]
         return super(DatetimeIndexOpsMixin, self).take(indices, axis)
-
-    def slice_locs(self, start=None, end=None):
-        """
-        Index.slice_locs, customized to handle partial ISO-8601 string slicing
-        """
-        if isinstance(start, compat.string_types) or isinstance(end, compat.string_types):
-
-            if self.is_monotonic:
-                try:
-                    if start:
-                        start_loc = self._get_string_slice(start).start
-                    else:
-                        start_loc = 0
-
-                    if end:
-                        end_loc = self._get_string_slice(end).stop
-                    else:
-                        end_loc = len(self)
-
-                    return start_loc, end_loc
-                except KeyError:
-                    pass
-
-            else:
-                # can't use a slice indexer because we are not sorted!
-                # so create an indexer directly
-                try:
-                    if start:
-                        start_loc = self._get_string_slice(start,
-                                                           use_rhs=False)
-                    else:
-                        start_loc = np.arange(len(self))
-
-                    if end:
-                        end_loc = self._get_string_slice(end, use_lhs=False)
-                    else:
-                        end_loc = np.arange(len(self))
-
-                    return start_loc, end_loc
-                except KeyError:
-                    pass
-
-        if isinstance(start, time) or isinstance(end, time):
-            raise KeyError('Cannot use slice_locs with time slice keys')
-
-        return Index.slice_locs(self, start, end)
 
     def get_duplicates(self):
         values = Index.get_duplicates(self)
@@ -299,7 +261,7 @@ class DatetimeIndexOpsMixin(object):
         return str
 
     def _format_footer(self):
-        raise NotImplementedError
+        raise AbstractMethodError(self)
 
     def __unicode__(self):
         formatter = self._formatter_func
@@ -336,11 +298,26 @@ class DatetimeIndexOpsMixin(object):
         from pandas.tseries.frequencies import get_reso_string
         return get_reso_string(self._resolution)
 
+    def _convert_scalar_indexer(self, key, kind=None):
+        """
+        we don't allow integer or float indexing on datetime-like when using loc
+
+        Parameters
+        ----------
+        key : label of the slice bound
+        kind : optional, type of the indexing operation (loc/ix/iloc/None)
+        """
+
+        if kind in ['loc'] and lib.isscalar(key) and (is_integer(key) or is_float(key)):
+            self._invalid_indexer('index',key)
+
+        return super(DatetimeIndexOpsMixin, self)._convert_scalar_indexer(key, kind=kind)
+
     def _add_datelike(self, other):
-        raise NotImplementedError
+        raise AbstractMethodError(self)
 
     def _sub_datelike(self, other):
-        raise NotImplementedError
+        raise AbstractMethodError(self)
 
     @classmethod
     def _add_datetimelike_methods(cls):
@@ -357,6 +334,8 @@ class DatetimeIndexOpsMixin(object):
                     return other._add_delta(self)
                 raise TypeError("cannot add TimedeltaIndex and {typ}".format(typ=type(other)))
             elif isinstance(other, Index):
+                warnings.warn("using '+' to provide set union with datetimelike Indexes is deprecated, "
+                              "use .union()",FutureWarning)
                 return self.union(other)
             elif isinstance(other, (DateOffset, timedelta, np.timedelta64, tslib.Timedelta)):
                 return self._add_delta(other)
@@ -367,6 +346,7 @@ class DatetimeIndexOpsMixin(object):
             else:  # pragma: no cover
                 return NotImplemented
         cls.__add__ = __add__
+        cls.__radd__ = __add__
 
         def __sub__(self, other):
             from pandas.core.index import Index
@@ -379,6 +359,8 @@ class DatetimeIndexOpsMixin(object):
                     raise TypeError("cannot subtract TimedeltaIndex and {typ}".format(typ=type(other)))
                 return self._add_delta(-other)
             elif isinstance(other, Index):
+                warnings.warn("using '-' to provide set differences with datetimelike Indexes is deprecated, "
+                              "use .difference()",FutureWarning)
                 return self.difference(other)
             elif isinstance(other, (DateOffset, timedelta, np.timedelta64, tslib.Timedelta)):
                 return self._add_delta(-other)
@@ -389,6 +371,10 @@ class DatetimeIndexOpsMixin(object):
             else:  # pragma: no cover
                 return NotImplemented
         cls.__sub__ = __sub__
+
+        def __rsub__(self, other):
+            return -(self - other)
+        cls.__rsub__ = __rsub__
 
         cls.__iadd__ = __add__
         cls.__isub__ = __sub__
@@ -500,3 +486,23 @@ class DatetimeIndexOpsMixin(object):
         """
         return self._simple_new(self.values.repeat(repeats),
                                 name=self.name)
+
+    def summary(self, name=None):
+        """
+        return a summarized representation
+        """
+        formatter = self._formatter_func
+        if len(self) > 0:
+            index_summary = ', %s to %s' % (formatter(self[0]),
+                                            formatter(self[-1]))
+        else:
+            index_summary = ''
+
+        if name is None:
+            name = type(self).__name__
+        result = '%s: %s entries%s' % (com.pprint_thing(name),
+                                       len(self), index_summary)
+        if self.freq:
+            result += '\nFreq: %s' % self.freqstr
+
+        return result

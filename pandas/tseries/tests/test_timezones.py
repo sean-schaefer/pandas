@@ -81,9 +81,9 @@ class TestTimeZoneSupportPytz(tm.TestCase):
         rng_eastern = rng.tz_convert(self.tzstr('US/Eastern'))
 
         # Values are unmodified
-        self.assert_(np.array_equal(rng.asi8, rng_eastern.asi8))
+        self.assertTrue(np.array_equal(rng.asi8, rng_eastern.asi8))
 
-        self.assert_(self.cmptz(rng_eastern.tz, self.tz('US/Eastern')))
+        self.assertTrue(self.cmptz(rng_eastern.tz, self.tz('US/Eastern')))
 
     def test_utc_to_local_no_modify_explicit(self):
         rng = date_range('3/11/2012', '3/12/2012', freq='H', tz='utc')
@@ -119,7 +119,7 @@ class TestTimeZoneSupportPytz(tm.TestCase):
         rng = date_range('3/10/2012', '3/11/2012', freq='30T')
         converted = rng.tz_localize(self.tz('US/Eastern'))
         expected_naive = rng + offsets.Hour(5)
-        self.assert_(np.array_equal(converted.asi8, expected_naive.asi8))
+        self.assertTrue(np.array_equal(converted.asi8, expected_naive.asi8))
 
         # DST ambiguity, this should fail
         rng = date_range('3/11/2012', '3/12/2012', freq='30T')
@@ -159,8 +159,8 @@ class TestTimeZoneSupportPytz(tm.TestCase):
         result = Timestamp(date(2012, 3, 11), tz=self.tz('US/Eastern'))
 
         expected = Timestamp('3/11/2012', tz=self.tz('US/Eastern'))
-        self.assertEquals(result.hour, expected.hour)
-        self.assertEquals(result, expected)
+        self.assertEqual(result.hour, expected.hour)
+        self.assertEqual(result, expected)
 
     def test_timestamp_to_datetime_tzoffset(self):
         # tzoffset
@@ -181,7 +181,7 @@ class TestTimeZoneSupportPytz(tm.TestCase):
         # spring forward, + "7" hours
         expected = Timestamp('3/11/2012 05:00', tz=self.tzstr('US/Eastern'))
 
-        self.assertEquals(result, expected)
+        self.assertEqual(result, expected)
 
     def test_timedelta_push_over_dst_boundary_explicit(self):
         # #1389
@@ -332,7 +332,7 @@ class TestTimeZoneSupportPytz(tm.TestCase):
         rng_eastern = rng.tz_convert(self.tzstr('US/Eastern'))
         # test not valid for dateutil timezones.
         # self.assertIn('EDT', repr(rng_eastern[0].tzinfo))
-        self.assert_('EDT' in repr(rng_eastern[0].tzinfo) or 'tzfile' in repr(rng_eastern[0].tzinfo))
+        self.assertTrue('EDT' in repr(rng_eastern[0].tzinfo) or 'tzfile' in repr(rng_eastern[0].tzinfo))
 
     def test_timestamp_tz_convert(self):
         strdates = ['1/1/2012', '3/1/2012', '4/1/2012']
@@ -443,7 +443,7 @@ class TestTimeZoneSupportPytz(tm.TestCase):
         localized_old = di.tz_localize(tz, infer_dst=True)
         self.assert_numpy_array_equal(dr, localized_old)
         self.assert_numpy_array_equal(dr, DatetimeIndex(times, tz=tz, ambiguous='infer'))
-        
+
         # When there is no dst transition, nothing special happens
         dr = date_range(datetime(2011, 6, 1, 0), periods=10,
                         freq=datetools.Hour())
@@ -463,31 +463,31 @@ class TestTimeZoneSupportPytz(tm.TestCase):
         times = ['11/06/2011 00:00', '11/06/2011 01:00',
                  '11/06/2011 01:00', '11/06/2011 02:00',
                  '11/06/2011 03:00']
-        
+
         # Test tz_localize
         di = DatetimeIndex(times)
         is_dst = [1, 1, 0, 0, 0]
         localized = di.tz_localize(tz, ambiguous=is_dst)
         self.assert_numpy_array_equal(dr, localized)
         self.assert_numpy_array_equal(dr, DatetimeIndex(times, tz=tz, ambiguous=is_dst))
-        
+
         localized = di.tz_localize(tz, ambiguous=np.array(is_dst))
         self.assert_numpy_array_equal(dr, localized)
-        
+
         localized = di.tz_localize(tz, ambiguous=np.array(is_dst).astype('bool'))
         self.assert_numpy_array_equal(dr, localized)
-        
+
         # Test constructor
         localized = DatetimeIndex(times, tz=tz, ambiguous=is_dst)
         self.assert_numpy_array_equal(dr, localized)
-             
+
         # Test duplicate times where infer_dst fails
         times += times
         di = DatetimeIndex(times)
-        
+
         # When the sizes are incompatible, make sure error is raised
         self.assertRaises(Exception, di.tz_localize, tz, ambiguous=is_dst)
-        
+
         # When sizes are compatible and there are repeats ('infer' won't work)
         is_dst = np.hstack((is_dst, is_dst))
         localized = di.tz_localize(tz, ambiguous=is_dst)
@@ -501,7 +501,7 @@ class TestTimeZoneSupportPytz(tm.TestCase):
         localized = dr.tz_localize(tz)
         localized_is_dst = dr.tz_localize(tz, ambiguous=is_dst)
         self.assert_numpy_array_equal(localized, localized_is_dst)
-        
+
     def test_ambiguous_nat(self):
         tz = self.tz('US/Eastern')
         times = ['11/06/2011 00:00', '11/06/2011 01:00',
@@ -509,7 +509,7 @@ class TestTimeZoneSupportPytz(tm.TestCase):
                  '11/06/2011 03:00']
         di = DatetimeIndex(times)
         localized = di.tz_localize(tz, ambiguous='NaT')
-        
+
         times = ['11/06/2011 00:00', np.NaN,
                  np.NaN, '11/06/2011 02:00',
                  '11/06/2011 03:00']

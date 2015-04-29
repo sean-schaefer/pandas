@@ -30,9 +30,9 @@ The axis labeling information in pandas objects serves many purposes:
 In this section, we will focus on the final point: namely, how to slice, dice,
 and generally get and set subsets of pandas objects. The primary focus will be
 on Series and DataFrame as they have received more development attention in
-this area. Expect more work to be invested higher-dimensional data structures
-(including ``Panel``) in the future, especially in label-based advanced
-indexing.
+this area. Expect more work to be invested in higher-dimensional data
+structures (including ``Panel``) in the future, especially in label-based
+advanced indexing.
 
 .. note::
 
@@ -54,7 +54,7 @@ indexing.
 
 .. warning::
 
-   In 0.15.0 ``Index`` has internally been refactored to no longer sub-class ``ndarray``
+   In 0.15.0 ``Index`` has internally been refactored to no longer subclass ``ndarray``
    but instead subclass ``PandasObject``, similarly to the rest of the pandas objects. This should be
    a transparent change with only very limited API implications (See the :ref:`Internal Refactoring <whatsnew_0150.refactoring>`)
 
@@ -71,8 +71,7 @@ Object selection has had a number of user-requested additions in order to
 support more explicit location based indexing. pandas now supports three types
 of multi-axis indexing.
 
-- ``.loc`` is strictly label based, will raise ``KeyError`` when the items are
-  not found, allowed inputs are:
+- ``.loc`` is primarily label based, but may also be used with a boolean array. ``.loc`` will raise ``KeyError`` when the items are not found. Allowed inputs are:
 
   - A single label, e.g. ``5`` or ``'a'``, (note that ``5`` is interpreted as a
     *label* of the index. This use is **not** an integer position along the
@@ -84,14 +83,17 @@ of multi-axis indexing.
 
   See more at :ref:`Selection by Label <indexing.label>`
 
-- ``.iloc`` is strictly integer position based (from ``0`` to ``length-1`` of
-  the axis), will raise ``IndexError`` if an indexer is requested and it
-  is out-of-bounds, except *slice* indexers which allow out-of-bounds indexing.
-  (this conforms with python/numpy *slice* semantics). Allowed inputs are:
+- ``.iloc`` is primarily integer position based (from ``0`` to
+  ``length-1`` of the axis), but may also be used with a boolean
+  array.  ``.iloc`` will raise ``IndexError`` if a requested
+  indexer is out-of-bounds, except *slice* indexers which allow
+  out-of-bounds indexing.  (this conforms with python/numpy *slice*
+  semantics).  Allowed inputs are:
 
   - An integer e.g. ``5``
   - A list or array of integers ``[4, 3, 0]``
   - A slice object with ints ``1:7``
+  - A boolean array
 
   See more at :ref:`Selection by Position <indexing.integer>`
 
@@ -223,9 +225,9 @@ new column.
 
    sa.a = 5
    sa
-   dfa.A = list(range(len(dfa.index)))       # ok if A already exists
+   dfa.A = list(range(len(dfa.index)))  # ok if A already exists
    dfa
-   dfa['A'] = list(range(len(dfa.index)))    # use this form to create a new column
+   dfa['A'] = list(range(len(dfa.index)))  # use this form to create a new column
    dfa
 
 .. warning::
@@ -246,6 +248,14 @@ new column.
 
 If you are using the IPython environment, you may also use tab-completion to
 see these accessible attributes.
+
+You can also assign a ``dict`` to a row of a ``DataFrame``:
+
+.. ipython:: python
+
+   x = pd.DataFrame({'x': [1, 2, 3], 'y': [3, 4, 5]})
+   x.iloc[1] = dict(x=9, y=99)
+   x
 
 Slicing ranges
 --------------
@@ -290,8 +300,29 @@ Selection By Label
    This is sometimes called ``chained assignment`` and should be avoided.
    See :ref:`Returning a View versus Copy <indexing.view_versus_copy>`
 
+.. warning::
+
+   ``.loc`` is strict when you present slicers that are not compatible (or convertible) with the index type. For example
+   using integers in a ``DatetimeIndex``. These will raise a ``TypeError``.
+
+  .. ipython:: python
+
+     dfl = DataFrame(np.random.randn(5,4), columns=list('ABCD'), index=date_range('20130101',periods=5))
+     dfl
+
+  .. code-block:: python
+
+     In [4]: dfl.loc[2:3]
+     TypeError: cannot do slice indexing on <class 'pandas.tseries.index.DatetimeIndex'> with these indexers [2] of <type 'int'>
+
+  String likes in slicing *can* be convertible to the type of the index and lead to natural slicing.
+
+  .. ipython:: python
+
+     dfl.loc['20130102':'20130104']
+
 pandas provides a suite of methods in order to have **purely label based indexing**. This is a strict inclusion based protocol.
-**at least 1** of the labels for which you ask, must be in the index or a ``KeyError`` will be raised! When slicing, the start bound is *included*, **AND** the stop bound is *included*. Integers are valid labels, but they refer to the label **and not the position**.
+**At least 1** of the labels for which you ask, must be in the index or a ``KeyError`` will be raised! When slicing, the start bound is *included*, **AND** the stop bound is *included*. Integers are valid labels, but they refer to the label **and not the position**.
 
 The ``.loc`` attribute is the primary access method. The following are valid inputs:
 
@@ -368,6 +399,7 @@ The ``.iloc`` attribute is the primary access method. The following are valid in
 - An integer e.g. ``5``
 - A list or array of integers ``[4, 3, 0]``
 - A slice object with ints ``1:7``
+- A boolean array
 
 .. ipython:: python
 
@@ -554,9 +586,10 @@ Using a boolean vector to index a Series works exactly as in a numpy ndarray:
 
 .. ipython:: python
 
+   s = Series(range(-3, 4))
+   s
    s[s > 0]
-   s[(s < 0) & (s > -0.5)]
-   s[(s < -1) | (s > 1 )]
+   s[(s < -1) | (s > 0.5)]
    s[~(s < 0)]
 
 You may select rows from a DataFrame using a boolean vector the same length as
@@ -1113,6 +1146,17 @@ should be taken instead.
    df2.drop_duplicates(['a','b'])
    df2.drop_duplicates(['a','b'], take_last=True)
 
+An alternative way to drop duplicates on the index is ``.groupby(level=0)`` combined with ``first()`` or ``last()``.
+
+.. ipython:: python
+
+   df3 = df2.set_index('b')
+   df3
+   df3.groupby(level=0).first()
+
+   # a bit more verbose
+   df3.reset_index().drop_duplicates(subset='b', take_last=False).set_index('b')
+
 .. _indexing.dictionarylike:
 
 Dictionary-like :meth:`~pandas.DataFrame.get` method
@@ -1483,5 +1527,3 @@ This will **not** work at all, and so should be avoided
    The chained assignment warnings / exceptions are aiming to inform the user of a possibly invalid
    assignment. There may be false positives; situations where a chained assignment is inadvertantly
    reported.
-
-

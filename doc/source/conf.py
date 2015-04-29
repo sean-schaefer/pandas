@@ -44,12 +44,9 @@ extensions = ['sphinx.ext.autodoc',
               'ipython_sphinxext.ipython_directive',
               'ipython_sphinxext.ipython_console_highlighting',
               'sphinx.ext.intersphinx',
-              'sphinx.ext.todo',
               'sphinx.ext.coverage',
               'sphinx.ext.pngmath',
               'sphinx.ext.ifconfig',
-              'matplotlib.sphinxext.only_directives',
-              'matplotlib.sphinxext.plot_directive',
               ]
 
 
@@ -214,7 +211,30 @@ html_static_path = ['_static']
 
 # Additional templates that should be rendered to pages, maps page names to
 # template names.
-# html_additional_pages = {}
+
+# Add redirect for previously existing API pages (which are now included in
+# the API pages as top-level functions) based on a template (GH9911) 
+moved_api_pages = [
+    'pandas.core.common.isnull', 'pandas.core.common.notnull', 'pandas.core.reshape.get_dummies',
+    'pandas.tools.merge.concat', 'pandas.tools.merge.merge', 'pandas.tools.pivot.pivot_table',
+    'pandas.tseries.tools.to_datetime', 'pandas.io.clipboard.read_clipboard', 'pandas.io.excel.ExcelFile.parse',
+    'pandas.io.excel.read_excel', 'pandas.io.html.read_html', 'pandas.io.json.read_json',
+    'pandas.io.parsers.read_csv', 'pandas.io.parsers.read_fwf', 'pandas.io.parsers.read_table',
+    'pandas.io.pickle.read_pickle', 'pandas.io.pytables.HDFStore.append', 'pandas.io.pytables.HDFStore.get',
+    'pandas.io.pytables.HDFStore.put', 'pandas.io.pytables.HDFStore.select', 'pandas.io.pytables.read_hdf',
+    'pandas.io.sql.read_sql', 'pandas.io.sql.read_frame', 'pandas.io.sql.write_frame',
+    'pandas.io.stata.read_stata', 'pandas.stats.moments.ewma', 'pandas.stats.moments.ewmcorr',
+    'pandas.stats.moments.ewmcov', 'pandas.stats.moments.ewmstd', 'pandas.stats.moments.ewmvar',
+    'pandas.stats.moments.expanding_apply', 'pandas.stats.moments.expanding_corr', 'pandas.stats.moments.expanding_count',
+    'pandas.stats.moments.expanding_cov', 'pandas.stats.moments.expanding_kurt', 'pandas.stats.moments.expanding_mean',
+    'pandas.stats.moments.expanding_median', 'pandas.stats.moments.expanding_quantile', 'pandas.stats.moments.expanding_skew',
+    'pandas.stats.moments.expanding_std', 'pandas.stats.moments.expanding_sum', 'pandas.stats.moments.expanding_var',
+    'pandas.stats.moments.rolling_apply', 'pandas.stats.moments.rolling_corr', 'pandas.stats.moments.rolling_count',
+    'pandas.stats.moments.rolling_cov', 'pandas.stats.moments.rolling_kurt', 'pandas.stats.moments.rolling_mean',
+    'pandas.stats.moments.rolling_median', 'pandas.stats.moments.rolling_quantile', 'pandas.stats.moments.rolling_skew',
+    'pandas.stats.moments.rolling_std', 'pandas.stats.moments.rolling_sum', 'pandas.stats.moments.rolling_var']
+
+html_additional_pages = {'generated/' + page: 'api_redirect.html' for page in moved_api_pages}
 
 # If false, no module index is generated.
 html_use_modindex = True
@@ -300,6 +320,73 @@ ipython_exec_lines = [
     'pd.options.display.encoding="utf8"'
     ]
 
+
+# Add custom Documenter to handle attributes/methods of an AccessorProperty
+# eg pandas.Series.str and pandas.Series.dt (see GH9322)
+
+from sphinx.util import rpartition
+from sphinx.ext.autodoc import Documenter, MethodDocumenter, AttributeDocumenter
+
+
+class AccessorLevelDocumenter(Documenter):
+    """
+    Specialized Documenter subclass for objects on accessor level (methods,
+    attributes).
+    """
+
+    # This is the simple straightforward version
+    # modname is None, base the last elements (eg 'hour')
+    # and path the part before (eg 'Series.dt')
+    # def resolve_name(self, modname, parents, path, base):
+    #     modname = 'pandas'
+    #     mod_cls = path.rstrip('.')
+    #     mod_cls = mod_cls.split('.')
+    #
+    #     return modname, mod_cls + [base]
+
+    def resolve_name(self, modname, parents, path, base):
+        if modname is None:
+            if path:
+                mod_cls = path.rstrip('.')
+            else:
+                mod_cls = None
+                # if documenting a class-level object without path,
+                # there must be a current class, either from a parent
+                # auto directive ...
+                mod_cls = self.env.temp_data.get('autodoc:class')
+                # ... or from a class directive
+                if mod_cls is None:
+                    mod_cls = self.env.temp_data.get('py:class')
+                # ... if still None, there's no way to know
+                if mod_cls is None:
+                    return None, []
+            # HACK: this is added in comparison to ClassLevelDocumenter
+            # mod_cls still exists of class.accessor, so an extra
+            # rpartition is needed
+            modname, accessor = rpartition(mod_cls, '.')
+            modname, cls = rpartition(modname, '.')
+            parents = [cls, accessor]
+            # if the module name is still missing, get it like above
+            if not modname:
+                modname = self.env.temp_data.get('autodoc:module')
+            if not modname:
+                modname = self.env.temp_data.get('py:module')
+            # ... else, it stays None, which means invalid
+        return modname, parents + [base]
+
+
+class AccessorAttributeDocumenter(AccessorLevelDocumenter, AttributeDocumenter):
+
+    objtype = 'accessorattribute'
+    directivetype = 'attribute'
+
+
+class AccessorMethodDocumenter(AccessorLevelDocumenter, MethodDocumenter):
+
+    objtype = 'accessormethod'
+    directivetype = 'method'
+
+
 # remove the docstring of the flags attribute (inherited from numpy ndarray)
 # because these give doc build errors (see GH issue 5331)
 def remove_flags_docstring(app, what, name, obj, options, lines):
@@ -308,3 +395,5 @@ def remove_flags_docstring(app, what, name, obj, options, lines):
 
 def setup(app):
     app.connect("autodoc-process-docstring", remove_flags_docstring)
+    app.add_autodocumenter(AccessorAttributeDocumenter)
+    app.add_autodocumenter(AccessorMethodDocumenter)

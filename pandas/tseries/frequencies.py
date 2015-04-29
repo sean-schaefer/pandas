@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime,timedelta
 from pandas.compat import range, long, zip
 from pandas import compat
 import re
@@ -12,6 +12,8 @@ import pandas.tseries.offsets as offsets
 import pandas.core.common as com
 import pandas.lib as lib
 import pandas.tslib as tslib
+import pandas._period as period
+from pandas.tslib import Timedelta
 
 class FreqGroup(object):
     FR_ANN = 1000
@@ -30,12 +32,12 @@ class FreqGroup(object):
 
 class Resolution(object):
 
-    RESO_US = tslib.US_RESO
-    RESO_MS = tslib.MS_RESO
-    RESO_SEC = tslib.S_RESO
-    RESO_MIN = tslib.T_RESO
-    RESO_HR = tslib.H_RESO
-    RESO_DAY = tslib.D_RESO
+    RESO_US = period.US_RESO
+    RESO_MS = period.MS_RESO
+    RESO_SEC = period.S_RESO
+    RESO_MIN = period.T_RESO
+    RESO_HR = period.H_RESO
+    RESO_DAY = period.D_RESO
 
     _reso_str_map = {
     RESO_US: 'microsecond',
@@ -276,9 +278,18 @@ for _i, _weekday in enumerate(['MON', 'TUE', 'WED', 'THU', 'FRI']):
 _legacy_reverse_map = dict((v, k) for k, v in
                            reversed(sorted(compat.iteritems(_rule_aliases))))
 
+_name_to_offset_map = {'days': Day(1),
+                       'hours': Hour(1),
+                       'minutes': Minute(1),
+                       'seconds': Second(1),
+                       'milliseconds': Milli(1),
+                       'microseconds': Micro(1),
+                       'nanoseconds': Nano(1)}
+
 def to_offset(freqstr):
     """
-    Return DateOffset object from string representation
+    Return DateOffset object from string representation or
+    Timedelta object
 
     Examples
     --------
@@ -298,6 +309,23 @@ def to_offset(freqstr):
             name, stride = stride, name
         name, _ = _base_and_stride(name)
         delta = get_offset(name) * stride
+
+    elif isinstance(freqstr, timedelta):
+        delta = None
+        freqstr = Timedelta(freqstr)
+        try:
+            for name in freqstr.components._fields:
+                offset = _name_to_offset_map[name]
+                stride = getattr(freqstr.components, name)
+                if stride != 0:
+                    offset = stride * offset
+                    if delta is None:
+                        delta = offset
+                    else:
+                        delta = delta + offset
+        except Exception:
+            raise ValueError("Could not evaluate %s" % freqstr)
+
     else:
         delta = None
         stride_sign = None
@@ -698,6 +726,8 @@ class _FrequencyInferer(object):
         self.index = index
         self.values = np.asarray(index).view('i8')
 
+        # This moves the values, which are implicitly in UTC, to the
+        # the timezone so they are in local time
         if hasattr(index,'tz'):
             if index.tz is not None:
                 self.values = tslib.tz_convert(self.values, 'UTC', index.tz)
@@ -712,10 +742,18 @@ class _FrequencyInferer(object):
     @cache_readonly
     def deltas(self):
         return tslib.unique_deltas(self.values)
+    
+    @cache_readonly
+    def deltas_asi8(self):
+        return tslib.unique_deltas(self.index.asi8)
 
     @cache_readonly
     def is_unique(self):
         return len(self.deltas) == 1
+    
+    @cache_readonly
+    def is_unique_asi8(self):
+        return len(self.deltas_asi8) == 1
 
     def get_freq(self):
         if not self.is_monotonic or not self.index.is_unique:
@@ -725,9 +763,12 @@ class _FrequencyInferer(object):
         if _is_multiple(delta, _ONE_DAY):
             return self._infer_daily_rule()
         else:
-            # Possibly intraday frequency
-            if not self.is_unique:
+            # Possibly intraday frequency.  Here we use the 
+            # original .asi8 values as the modified values
+            # will not work around DST transitions.  See #8772
+            if not self.is_unique_asi8:
                 return None
+            delta = self.deltas_asi8[0]
             if _is_multiple(delta, _ONE_HOUR):
                 # Hours
                 return _maybe_add_count('H', delta / _ONE_HOUR)

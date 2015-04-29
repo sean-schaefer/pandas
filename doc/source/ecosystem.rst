@@ -130,6 +130,22 @@ API
 Quandl API for Python wraps the Quandl REST API to return
 Pandas DataFrames with timeseries indexes.
 
+`pydatastream <https://github.com/vfilimonov/pydatastream>`_
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+PyDatastream is a Python interface to the 
+`Thomson Dataworks Enterprise (DWE/Datastream) <http://dataworks.thomson.com/Dataworks/Enterprise/1.0/>`__
+SOAP API to return indexed Pandas DataFrames or Panels with financial data. 
+This package requires valid credentials for this API (non free).
+
+`pandaSDMX <http://pandasdmx.readthedocs.org>`_
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+pandaSDMX is an extensible library to retrieve and acquire statistical data 
+and metadata disseminated in 
+`SDMX <http://www.sdmx.org>`_ 2.1. This standard is currently supported by 
+the European statistics office (Eurostat)
+and the European Central Bank (ECB). Datasets may be returned as pandas Series 
+or multi-indexed DataFrames.   
+
 
 .. _ecosystem.domain:
 

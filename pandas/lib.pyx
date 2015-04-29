@@ -898,17 +898,17 @@ def clean_index_list(list obj):
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
-def max_len_string_array(ndarray[object, ndim=1] arr):
+def max_len_string_array(ndarray arr):
     """ return the maximum size of elements in a 1-dim string array """
     cdef:
         int i, m, l
-        length = arr.shape[0]
+        int length = arr.shape[0]
         object v
 
     m = 0
     for i from 0 <= i < length:
         v = arr[i]
-        if PyString_Check(v) or PyBytes_Check(v):
+        if PyString_Check(v) or PyBytes_Check(v) or PyUnicode_Check(v):
             l = len(v)
 
             if l > m:
@@ -933,7 +933,7 @@ def string_array_replace_from_nan_rep(ndarray[object, ndim=1] arr, object nan_re
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
-def write_csv_rows(list data, list data_index, int nlevels, list cols, object writer):
+def write_csv_rows(list data, ndarray data_index, int nlevels, ndarray cols, object writer):
 
     cdef int N, j, i, ncols
     cdef list rows
@@ -1138,6 +1138,27 @@ def row_bool_subset_object(ndarray[object, ndim=2] values,
 
     return out
 
+@cython.boundscheck(False)
+@cython.wraparound(False)
+def get_level_sorter(ndarray[int64_t, ndim=1] label,
+                     ndarray[int64_t, ndim=1] starts):
+    """
+    argsort for a single level of a multi-index, keeping the order of higher
+    levels unchanged. `starts` points to starts of same-key indices w.r.t
+    to leading levels; equivalent to:
+        np.hstack([label[starts[i]:starts[i+1]].argsort(kind='mergesort')
+            + starts[i] for i in range(len(starts) - 1)])
+    """
+    cdef:
+        int64_t l, r
+        Py_ssize_t i
+        ndarray[int64_t, ndim=1] out = np.empty(len(label), dtype=np.int64)
+
+    for i in range(len(starts) - 1):
+        l, r = starts[i], starts[i + 1]
+        out[l:r] = l + label[l:r].argsort(kind='mergesort')
+
+    return out
 
 def group_count(ndarray[int64_t] values, Py_ssize_t size):
     cdef:
@@ -1257,7 +1278,7 @@ def fast_zip_fillna(list ndarrays, fill_value=pandas_null):
 def duplicated(ndarray[object] values, take_last=False):
     cdef:
         Py_ssize_t i, n
-        dict seen = {}
+        set seen = set()
         object row
 
     n = len(values)
@@ -1270,7 +1291,7 @@ def duplicated(ndarray[object] values, take_last=False):
             if row in seen:
                 result[i] = 1
             else:
-                seen[row] = None
+                seen.add(row)
                 result[i] = 0
     else:
         for i from 0 <= i < n:
@@ -1278,7 +1299,7 @@ def duplicated(ndarray[object] values, take_last=False):
             if row in seen:
                 result[i] = 1
             else:
-                seen[row] = None
+                seen.add(row)
                 result[i] = 0
 
     return result.view(np.bool_)

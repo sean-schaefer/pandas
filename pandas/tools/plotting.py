@@ -12,6 +12,7 @@ import numpy as np
 
 from pandas.util.decorators import cache_readonly, deprecate_kwarg
 import pandas.core.common as com
+from pandas.core.common import AbstractMethodError
 from pandas.core.generic import _shared_docs, _shared_doc_kwargs
 from pandas.core.index import Index, MultiIndex
 from pandas.core.series import Series, remove_na
@@ -131,7 +132,7 @@ def _get_standard_colors(num_colors=None, colormap=None, color_type='default',
 
             colors = lmap(random_color, lrange(num_colors))
         else:
-            raise NotImplementedError
+            raise ValueError("color_type must be either 'default' or 'random'")
 
     if len(colors) != num_colors:
         multiple = num_colors//len(colors) - 1
@@ -303,45 +304,32 @@ def scatter_matrix(frame, alpha=0.5, figsize=None, ax=None, grid=False,
                 ax.set_xlim(boundaries_list[j])
                 ax.set_ylim(boundaries_list[i])
 
-            ax.set_xlabel('')
-            ax.set_ylabel('')
-
-            _label_axis(ax, kind='x', label=b, position='bottom', rotate=True)
-
-            _label_axis(ax, kind='y', label=a, position='left')
+            ax.set_xlabel(b)
+            ax.set_ylabel(a)
 
             if j!= 0:
                 ax.yaxis.set_visible(False)
             if i != n-1:
                 ax.xaxis.set_visible(False)
 
-    for ax in axes.flat:
-        setp(ax.get_xticklabels(), fontsize=8)
-        setp(ax.get_yticklabels(), fontsize=8)
+    if len(df.columns) > 1:
+        lim1 = boundaries_list[0]
+        locs = axes[0][1].yaxis.get_majorticklocs()
+        locs = locs[(lim1[0] <= locs) & (locs <= lim1[1])]
+        adj = (locs - lim1[0]) / (lim1[1] - lim1[0])
+
+        lim0 = axes[0][0].get_ylim()
+        adj = adj * (lim0[1] - lim0[0]) + lim0[0]
+        axes[0][0].yaxis.set_ticks(adj)
+
+        if np.all(locs == locs.astype(int)):
+            # if all ticks are int
+            locs = locs.astype(int)
+        axes[0][0].yaxis.set_ticklabels(locs)
+
+    _set_ticks_props(axes, xlabelsize=8, xrot=90, ylabelsize=8, yrot=0)
 
     return axes
-
-def _label_axis(ax, kind='x', label='', position='top',
-    ticks=True, rotate=False):
-
-    from matplotlib.artist import setp
-    if kind == 'x':
-        ax.set_xlabel(label, visible=True)
-        ax.xaxis.set_visible(True)
-        ax.xaxis.set_ticks_position(position)
-        ax.xaxis.set_label_position(position)
-        if rotate:
-            setp(ax.get_xticklabels(), rotation=90)
-    elif kind == 'y':
-        ax.yaxis.set_visible(True)
-        ax.set_ylabel(label, visible=True)
-        # ax.set_ylabel(a)
-        ax.yaxis.set_ticks_position(position)
-        ax.yaxis.set_label_position(position)
-    return
-
-
-
 
 
 def _gca():
@@ -581,7 +569,7 @@ def bootstrap_plot(series, fig=None, size=50, samples=500, **kwds):
 @deprecate_kwarg(old_arg_name='data', new_arg_name='frame')
 def parallel_coordinates(frame, class_column, cols=None, ax=None, color=None,
                          use_columns=False, xticks=None, colormap=None,
-                         **kwds):
+                         axvlines=True, **kwds):
     """Parallel coordinates plotting.
 
     Parameters
@@ -601,6 +589,8 @@ def parallel_coordinates(frame, class_column, cols=None, ax=None, color=None,
         A list of values to use for xticks
     colormap: str or matplotlib colormap, default None
         Colormap to use for line colors.
+    axvlines: bool, optional
+        If true, vertical lines will be added at each xtick
     kwds: keywords
         Options to pass to matplotlib plotting method
 
@@ -665,8 +655,9 @@ def parallel_coordinates(frame, class_column, cols=None, ax=None, color=None,
         else:
             ax.plot(x, y, color=colors[kls], **kwds)
 
-    for i in x:
-        ax.axvline(i, linewidth=1, color='black')
+    if axvlines:
+        for i in x:
+            ax.axvline(i, linewidth=1, color='black')
 
     ax.set_xticks(x)
     ax.set_xticklabels(df.columns)
@@ -766,7 +757,7 @@ class MPLPlot(object):
     _attr_defaults = {'logy': False, 'logx': False, 'loglog': False,
                       'mark_right': True, 'stacked': False}
 
-    def __init__(self, data, kind=None, by=None, subplots=False, sharex=True,
+    def __init__(self, data, kind=None, by=None, subplots=False, sharex=None,
                  sharey=False, use_index=True,
                  figsize=None, grid=None, legend=True, rot=None,
                  ax=None, fig=None, title=None, xlim=None, ylim=None,
@@ -783,7 +774,16 @@ class MPLPlot(object):
         self.sort_columns = sort_columns
 
         self.subplots = subplots
-        self.sharex = sharex
+
+        if sharex is None:
+            if ax is None:
+                 self.sharex = True
+            else:
+                 # if we get an axis, the users should do the visibility setting...
+                 self.sharex = False
+        else:
+            self.sharex = sharex
+
         self.sharey = sharey
         self.figsize = figsize
         self.layout = layout
@@ -868,12 +868,17 @@ class MPLPlot(object):
                           "simultaneously. Using 'color'")
 
         if 'color' in self.kwds and self.style is not None:
+            if com.is_list_like(self.style):
+                styles = self.style
+            else:
+                styles = [self.style]
             # need only a single match
-            if re.match('^[a-z]+?', self.style) is not None:
-                raise ValueError("Cannot pass 'style' string with a color "
-                                 "symbol and 'color' keyword argument. Please"
-                                 " use one or the other or pass 'style' "
-                                 "without a color symbol")
+            for s in styles:
+                if re.match('^[a-z]+?', s) is not None:
+                    raise ValueError("Cannot pass 'style' string with a color "
+                                     "symbol and 'color' keyword argument. Please"
+                                     " use one or the other or pass 'style' "
+                                     "without a color symbol")
 
     def _iter_data(self, data=None, keep_index=False, fillna=None):
         if data is None:
@@ -881,27 +886,16 @@ class MPLPlot(object):
         if fillna is not None:
             data = data.fillna(fillna)
 
-        from pandas.core.frame import DataFrame
-        if isinstance(data, (Series, np.ndarray, Index)):
+        if self.sort_columns:
+            columns = com._try_sort(data.columns)
+        else:
+            columns = data.columns
+
+        for col in columns:
             if keep_index is True:
-                yield self.label, data
+                yield col, data[col]
             else:
-                yield self.label, np.asarray(data)
-        elif isinstance(data, DataFrame):
-            if self.sort_columns:
-                columns = com._try_sort(data.columns)
-            else:
-                columns = data.columns
-
-            for col in columns:
-                # # is this right?
-                # empty = df[col].count() == 0
-                # values = df[col].values if not empty else np.zeros(len(df))
-
-                if keep_index is True:
-                    yield col, data[col]
-                else:
-                    yield col, data[col].values
+                yield col, data[col].values
 
     @property
     def nseries(self):
@@ -926,17 +920,31 @@ class MPLPlot(object):
     def _args_adjust(self):
         pass
 
-    def _maybe_right_yaxis(self, ax):
+    def _has_plotted_object(self, ax):
+        """check whether ax has data"""
+        return (len(ax.lines) != 0 or
+                len(ax.artists) != 0 or
+                len(ax.containers) != 0)
+
+    def _maybe_right_yaxis(self, ax, axes_num):
+        if not self.on_right(axes_num):
+            # secondary axes may be passed via ax kw
+            return self._get_ax_layer(ax)
+
         if hasattr(ax, 'right_ax'):
+            # if it has right_ax proparty, ``ax`` must be left axes
             return ax.right_ax
+        elif hasattr(ax, 'left_ax'):
+            # if it has left_ax proparty, ``ax`` must be right axes
+            return ax
         else:
+            # otherwise, create twin axes
             orig_ax, new_ax = ax, ax.twinx()
             new_ax._get_lines.color_cycle = orig_ax._get_lines.color_cycle
 
             orig_ax.right_ax, new_ax.left_ax = new_ax, orig_ax
-            new_ax.right_ax = new_ax
 
-            if len(orig_ax.get_lines()) == 0:  # no data on left y
+            if not self._has_plotted_object(orig_ax):  # no data on left y
                 orig_ax.get_yaxis().set_visible(False)
             return new_ax
 
@@ -978,10 +986,25 @@ class MPLPlot(object):
             else:
                 return self.axes
         else:
-            return self.axes[0]
+            sec_true = isinstance(self.secondary_y, bool) and self.secondary_y
+            all_sec = (com.is_list_like(self.secondary_y) and
+                       len(self.secondary_y) == self.nseries)
+            if (sec_true or all_sec):
+                # if all data is plotted on secondary, return right axes
+                return self._get_ax_layer(self.axes[0], primary=False)
+            else:
+                return self.axes[0]
 
     def _compute_plot_data(self):
-        numeric_data = self.data.convert_objects()._get_numeric_data()
+        data = self.data
+
+        if isinstance(data, Series):
+            label = self.kwds.pop('label', None)
+            if label is None and data.name is None:
+                label = 'None'
+            data = data.to_frame(name=label)
+
+        numeric_data = data.convert_objects()._get_numeric_data()
 
         try:
             is_empty = numeric_data.empty
@@ -996,18 +1019,13 @@ class MPLPlot(object):
         self.data = numeric_data
 
     def _make_plot(self):
-        raise NotImplementedError
+        raise AbstractMethodError(self)
 
     def _add_table(self):
         if self.table is False:
             return
         elif self.table is True:
-            from pandas.core.frame import DataFrame
-            if isinstance(self.data, Series):
-                data = DataFrame(self.data, columns=[self.data.name])
-            elif isinstance(self.data, DataFrame):
-                data = self.data
-            data = data.transpose()
+            data = self.data.transpose()
         else:
             data = self.table
         ax = self._get_ax(0)
@@ -1019,7 +1037,13 @@ class MPLPlot(object):
     def _adorn_subplots(self):
         to_adorn = self.axes
 
-        # todo: sharex, sharey handling?
+        if len(self.axes) > 0:
+            all_axes = self._get_axes()
+            nrows, ncols = self._get_axes_layout()
+            _handle_shared_axes(axarr=all_axes, nplots=len(all_axes),
+                                naxes=nrows * ncols, nrows=nrows,
+                                ncols=ncols, sharex=self.sharex,
+                                sharey=self.sharey)
 
         for ax in to_adorn:
             if self.yticks is not None:
@@ -1051,13 +1075,15 @@ class MPLPlot(object):
                     xticklabels = [labels.get(x, '') for x in ax.get_xticks()]
                     ax.set_xticklabels(xticklabels)
                 self._apply_axis_properties(ax.xaxis, rot=self.rot,
-                                           fontsize=self.fontsize)
+                                            fontsize=self.fontsize)
+                self._apply_axis_properties(ax.yaxis, fontsize=self.fontsize)
             elif self.orientation == 'horizontal':
                 if self._need_to_set_index:
                     yticklabels = [labels.get(y, '') for y in ax.get_yticks()]
                     ax.set_yticklabels(yticklabels)
                 self._apply_axis_properties(ax.yaxis, rot=self.rot,
-                                           fontsize=self.fontsize)
+                                            fontsize=self.fontsize)
+                self._apply_axis_properties(ax.xaxis, fontsize=self.fontsize)
 
     def _apply_axis_properties(self, axis, rot=None, fontsize=None):
         labels = axis.get_majorticklabels() + axis.get_minorticklabels()
@@ -1069,18 +1095,15 @@ class MPLPlot(object):
 
     @property
     def legend_title(self):
-        if hasattr(self.data, 'columns'):
-            if not isinstance(self.data.columns, MultiIndex):
-                name = self.data.columns.name
-                if name is not None:
-                    name = com.pprint_thing(name)
-                return name
-            else:
-                stringified = map(com.pprint_thing,
-                                  self.data.columns.names)
-                return ','.join(stringified)
+        if not isinstance(self.data.columns, MultiIndex):
+            name = self.data.columns.name
+            if name is not None:
+                name = com.pprint_thing(name)
+            return name
         else:
-            return None
+            stringified = map(com.pprint_thing,
+                              self.data.columns.names)
+            return ','.join(stringified)
 
     def _add_legend_handle(self, handle, label, index=None):
         if not label is None:
@@ -1118,12 +1141,13 @@ class MPLPlot(object):
 
         elif self.subplots and self.legend:
             for ax in self.axes:
-                ax.legend(loc='best')
+                if ax.get_visible():
+                    ax.legend(loc='best')
 
     def _get_ax_legend(self, ax):
         leg = ax.get_legend()
-        other_ax = (getattr(ax, 'right_ax', None) or
-                    getattr(ax, 'left_ax', None))
+        other_ax = (getattr(ax, 'left_ax', None) or
+                    getattr(ax, 'right_ax', None))
         other_leg = None
         if other_ax is not None:
             other_leg = other_ax.get_legend()
@@ -1210,36 +1234,32 @@ class MPLPlot(object):
 
         return name
 
+    @classmethod
+    def _get_ax_layer(cls, ax, primary=True):
+        """get left (primary) or right (secondary) axes"""
+        if primary:
+            return getattr(ax, 'left_ax', ax)
+        else:
+            return getattr(ax, 'right_ax', ax)
+
     def _get_ax(self, i):
         # get the twinx ax if appropriate
         if self.subplots:
             ax = self.axes[i]
-
-            if self.on_right(i):
-                ax = self._maybe_right_yaxis(ax)
-                self.axes[i] = ax
+            ax = self._maybe_right_yaxis(ax, i)
+            self.axes[i] = ax
         else:
             ax = self.axes[0]
-
-            if self.on_right(i):
-                ax = self._maybe_right_yaxis(ax)
-
-                sec_true = isinstance(self.secondary_y, bool) and self.secondary_y
-                all_sec = (com.is_list_like(self.secondary_y) and
-                           len(self.secondary_y) == self.nseries)
-                if sec_true or all_sec:
-                    self.axes[0] = ax
+            ax = self._maybe_right_yaxis(ax, i)
 
         ax.get_yaxis().set_visible(True)
         return ax
 
     def on_right(self, i):
-        from pandas.core.frame import DataFrame
         if isinstance(self.secondary_y, bool):
             return self.secondary_y
 
-        if (isinstance(self.data, DataFrame) and
-                isinstance(self.secondary_y, (tuple, list, np.ndarray, Index))):
+        if isinstance(self.secondary_y, (tuple, list, np.ndarray, Index)):
             return self.data.columns[i] in self.secondary_y
 
     def _get_style(self, i, col_name):
@@ -1370,6 +1390,19 @@ class MPLPlot(object):
                     errors[kw] = err
         return errors
 
+    def _get_axes(self):
+        return self.axes[0].get_figure().get_axes()
+
+    def _get_axes_layout(self):
+        axes = self._get_axes()
+        x_set = set()
+        y_set = set()
+        for ax in axes:
+            # check axes coordinates to estimate layout
+            points = ax.get_position().get_points()
+            x_set.add(points[0][0])
+            y_set.add(points[0][1])
+        return (len(y_set), len(x_set))
 
 class ScatterPlot(MPLPlot):
     _layout_type = 'single'
@@ -1401,8 +1434,10 @@ class ScatterPlot(MPLPlot):
         x, y, c, data = self.x, self.y, self.c, self.data
         ax = self.axes[0]
 
+        c_is_column = com.is_hashable(c) and c in self.data.columns
+
         # plot a colorbar only if a colormap is provided or necessary
-        cb = self.kwds.pop('colorbar', self.colormap or c in self.data.columns)
+        cb = self.kwds.pop('colorbar', self.colormap or c_is_column)
 
         # pandas uses colormap, matplotlib uses cmap.
         cmap = self.colormap or 'Greys'
@@ -1410,7 +1445,7 @@ class ScatterPlot(MPLPlot):
 
         if c is None:
             c_values = self.plt.rcParams['patch.facecolor']
-        elif c in self.data.columns:
+        elif c_is_column:
             c_values = self.data[c].values
         else:
             c_values = c
@@ -1425,10 +1460,13 @@ class ScatterPlot(MPLPlot):
             img = ax.collections[0]
             kws = dict(ax=ax)
             if mpl_ge_1_3_1:
-                kws['label'] = c if c in self.data.columns else ''
+                kws['label'] = c if c_is_column else ''
             self.fig.colorbar(img, **kws)
 
-        self._add_legend_handle(scatter, label)
+        if label is not None:
+            self._add_legend_handle(scatter, label)
+        else:
+            self.legend = False
 
         errors_x = self._get_errorbars(label=x, index=0, yerr=False)
         errors_y = self._get_errorbars(label=y, index=0, xerr=False)
@@ -1489,6 +1527,9 @@ class HexBinPlot(MPLPlot):
             img = ax.collections[0]
             self.fig.colorbar(img, ax=ax)
 
+    def _make_legend(self):
+        pass
+
     def _post_plot_logic(self):
         ax = self.axes[0]
         x, y = self.x, self.y
@@ -1510,16 +1551,14 @@ class LinePlot(MPLPlot):
             self.x_compat = bool(self.kwds.pop('x_compat'))
 
     def _index_freq(self):
-        from pandas.core.frame import DataFrame
-        if isinstance(self.data, (Series, DataFrame)):
-            freq = getattr(self.data.index, 'freq', None)
-            if freq is None:
-                freq = getattr(self.data.index, 'inferred_freq', None)
-                if freq == 'B':
-                    weekdays = np.unique(self.data.index.dayofweek)
-                    if (5 in weekdays) or (6 in weekdays):
-                        freq = None
-            return freq
+        freq = getattr(self.data.index, 'freq', None)
+        if freq is None:
+            freq = getattr(self.data.index, 'inferred_freq', None)
+            if freq == 'B':
+                weekdays = np.unique(self.data.index.dayofweek)
+                if (5 in weekdays) or (6 in weekdays):
+                    freq = None
+        return freq
 
     def _is_dynamic_freq(self, freq):
         if isinstance(freq, DateOffset):
@@ -1531,9 +1570,7 @@ class LinePlot(MPLPlot):
 
     def _no_base(self, freq):
         # hack this for 0.10.1, creating more technical debt...sigh
-        from pandas.core.frame import DataFrame
-        if (isinstance(self.data, (Series, DataFrame))
-            and isinstance(self.data.index, DatetimeIndex)):
+        if isinstance(self.data.index, DatetimeIndex):
             base = frequencies.get_freq(freq)
             x = self.data.index
             if (base <= frequencies.FreqGroup.FR_DAY):
@@ -1643,17 +1680,13 @@ class LinePlot(MPLPlot):
     def _maybe_convert_index(self, data):
         # tsplot converts automatically, but don't want to convert index
         # over and over for DataFrames
-        from pandas.core.frame import DataFrame
-        if (isinstance(data.index, DatetimeIndex) and
-                isinstance(data, DataFrame)):
+        if isinstance(data.index, DatetimeIndex):
             freq = getattr(data.index, 'freq', None)
 
             if freq is None:
                 freq = getattr(data.index, 'inferred_freq', None)
             if isinstance(freq, DateOffset):
                 freq = freq.rule_code
-            freq = frequencies.get_base_alias(freq)
-            freq = frequencies.get_period_alias(freq)
 
             if freq is None:
                 ax = self._get_ax(0)
@@ -1662,9 +1695,10 @@ class LinePlot(MPLPlot):
             if freq is None:
                 raise ValueError('Could not get frequency alias for plotting')
 
-            data = DataFrame(data.values,
-                             index=data.index.to_period(freq=freq),
-                             columns=data.columns)
+            freq = frequencies.get_base_alias(freq)
+            freq = frequencies.get_period_alias(freq)
+
+            data.index = data.index.to_period(freq=freq)
         return data
 
     def _post_plot_logic(self):
@@ -1685,7 +1719,7 @@ class LinePlot(MPLPlot):
                     self.rot = 30
                 format_date_labels(ax, rot=self.rot)
 
-            if index_name is not None:
+            if index_name is not None and self.use_index:
                 ax.set_xlabel(index_name)
 
 
@@ -1793,21 +1827,19 @@ class BarPlot(MPLPlot):
         if self.kind == 'bar':
             def f(ax, x, y, w, start=None, **kwds):
                 start = start + self.bottom
-                return ax.bar(x, y, w, bottom=start,log=self.log, **kwds)
+                return ax.bar(x, y, w, bottom=start, log=self.log, **kwds)
         elif self.kind == 'barh':
+
             def f(ax, x, y, w, start=None, log=self.log, **kwds):
                 start = start + self.left
-                return ax.barh(x, y, w, left=start, **kwds)
+                return ax.barh(x, y, w, left=start, log=self.log, **kwds)
         else:
-            raise NotImplementedError
+            raise ValueError("BarPlot kind must be either 'bar' or 'barh'")
 
         return f
 
     def _make_plot(self):
         import matplotlib as mpl
-        # mpl decided to make their version string unicode across all Python
-        # versions for mpl >= 1.3 so we have to call str here for python 2
-        mpl_le_1_2_1 = str(mpl.__version__) <= LooseVersion('1.2.1')
 
         colors = self._get_colors()
         ncolors = len(colors)
@@ -1831,11 +1863,8 @@ class BarPlot(MPLPlot):
                 kwds['ecolor'] = mpl.rcParams['xtick.color']
 
             start = 0
-            if self.log:
+            if self.log and (y >= 1).all():
                 start = 1
-                if any(y < 1):
-                    # GH3254
-                    start = 0 if mpl_le_1_2_1 else None
 
             if self.subplots:
                 w = self.bar_width / 2
@@ -1872,17 +1901,14 @@ class BarPlot(MPLPlot):
                 ax.set_xlim((s_edge, e_edge))
                 ax.set_xticks(self.tick_pos)
                 ax.set_xticklabels(str_index)
-                if not self.log: # GH3254+
-                    ax.axhline(0, color='k', linestyle='--')
-                if name is not None:
+                if name is not None and self.use_index:
                     ax.set_xlabel(name)
             elif self.kind == 'barh':
                 # horizontal bars
                 ax.set_ylim((s_edge, e_edge))
                 ax.set_yticks(self.tick_pos)
                 ax.set_yticklabels(str_index)
-                ax.axvline(0, color='k', linestyle='--')
-                if name is not None:
+                if name is not None and self.use_index:
                     ax.set_ylabel(name)
             else:
                 raise NotImplementedError(self.kind)
@@ -1908,7 +1934,8 @@ class HistPlot(LinePlot):
     def _args_adjust(self):
         if com.is_integer(self.bins):
             # create common bin edge
-            values = np.ravel(self.data.values)
+            values = self.data.convert_objects()._get_numeric_data()
+            values = np.ravel(values)
             values = values[~com.isnull(values)]
 
             hist, self.bins = np.histogram(values, bins=self.bins,
@@ -1947,7 +1974,7 @@ class HistPlot(LinePlot):
                 kwds['style'] = style
 
             artists = plotf(ax, y, column_num=i, **kwds)
-            self._add_legend_handle(artists[0], label)
+            self._add_legend_handle(artists[0], label, index=i)
 
     def _post_plot_logic(self):
         if self.orientation == 'horizontal':
@@ -2205,6 +2232,9 @@ class BoxPlot(LinePlot):
         else:
             ax.set_yticklabels(labels)
 
+    def _make_legend(self):
+        pass
+
     def _post_plot_logic(self):
         pass
 
@@ -2243,7 +2273,7 @@ def _plot(data, x=None, y=None, subplots=False,
     if kind in _all_kinds:
         klass = _plot_klass[kind]
     else:
-        raise ValueError('Invalid chart type given %s' % kind)
+        raise ValueError("%r is not a valid plot kind" % kind)
 
     from pandas import DataFrame
     if kind in _dataframe_kinds:
@@ -2251,7 +2281,8 @@ def _plot(data, x=None, y=None, subplots=False,
             plot_obj = klass(data, x=x, y=y, subplots=subplots, ax=ax,
                              kind=kind, **kwds)
         else:
-            raise ValueError('Invalid chart type given %s' % kind)
+            raise ValueError("plot kind %r can only be used for data frames"
+                             % kind)
 
     elif kind in _series_kinds:
         if isinstance(data, DataFrame):
@@ -2275,10 +2306,9 @@ def _plot(data, x=None, y=None, subplots=False,
             if y is not None:
                 if com.is_integer(y) and not data.columns.holds_integer():
                     y = data.columns[y]
-                label = x if x is not None else data.index.name
-                label = kwds.pop('label', label)
+                label = kwds['label'] if 'label' in kwds else y
                 series = data[y].copy()  # Don't modify
-                series.index.name = label
+                series.name = label
 
                 for kw in ['xerr', 'yerr']:
                     if (kw in kwds) and \
@@ -2319,10 +2349,14 @@ series_unique = """label : label argument to provide to plot
 df_ax = """ax : matplotlib axes object, default None
     subplots : boolean, default False
         Make separate subplots for each column
-    sharex : boolean, default True
-        In case subplots=True, share x axis
+    sharex : boolean, default True if ax is None else False
+        In case subplots=True, share x axis and set some x axis labels to
+        invisible; defaults to True if ax is None otherwise False if an ax
+        is passed in; Be aware, that passing in both an ax and sharex=True
+        will alter all x axis labels for all axis in a figure!
     sharey : boolean, default False
-        In case subplots=True, share y axis
+        In case subplots=True, share y axis and set some y axis labels to
+        invisible
     layout : tuple (optional)
         (rows, columns) for the layout of subplots"""
 series_ax = """ax : matplotlib axes object
@@ -2390,9 +2424,9 @@ _shared_docs['plot'] = """
     xlim : 2-tuple/list
     ylim : 2-tuple/list
     rot : int, default None
-        Rotation for ticks
+        Rotation for ticks (xticks for vertical, yticks for horizontal plots)
     fontsize : int, default None
-        Font size for ticks
+        Font size for xticks and yticks
     colormap : str or matplotlib colormap object, default None
         Colormap to select colors from. If string, load colormap with that name
         from matplotlib.
@@ -2434,7 +2468,7 @@ _shared_docs['plot'] = """
 
 @Appender(_shared_docs['plot'] % _shared_doc_df_kwargs)
 def plot_frame(data, x=None, y=None, kind='line', ax=None,                 # Dataframe unique
-               subplots=False, sharex=True, sharey=False, layout=None,     # Dataframe unique
+               subplots=False, sharex=None, sharey=False, layout=None,     # Dataframe unique
                figsize=None, use_index=True, title=None, grid=None,
                legend=True, style=None, logx=False, logy=False, loglog=False,
                xticks=None, yticks=None, xlim=None, ylim=None,
@@ -2473,10 +2507,7 @@ def plot_series(data, kind='line', ax=None,                    # Series unique
     """
     if ax is None and len(plt.get_fignums()) > 0:
         ax = _gca()
-        ax = getattr(ax, 'left_ax', ax)
-    # is there harm in this?
-    if label is None:
-        label = data.name
+        ax = MPLPlot._get_ax_layer(ax)
     return _plot(data, kind=kind, ax=ax,
                  figsize=figsize, use_index=use_index, title=title,
                  grid=grid, legend=legend,
@@ -2699,8 +2730,14 @@ def hist_frame(data, column=None, by=None, grid=True, xlabelsize=None,
     yrot : float, default None
         rotation of y axis labels
     ax : matplotlib axes object, default None
-    sharex : bool, if True, the X axis will be shared amongst all subplots.
-    sharey : bool, if True, the Y axis will be shared amongst all subplots.
+    sharex : boolean, default True if ax is None else False
+        In case subplots=True, share x axis and set some x axis labels to
+        invisible; defaults to True if ax is None otherwise False if an ax
+        is passed in; Be aware, that passing in both an ax and sharex=True
+        will alter all x axis labels for all subplots in a figure!
+    sharey : boolean, default False
+        In case subplots=True, share y axis and set some y axis labels to
+        invisible
     figsize : tuple
         The size of the figure to create in inches by default
     layout: (optional) a tuple (rows, columns) for the layout of the histograms
@@ -2874,6 +2911,7 @@ def boxplot_frame_groupby(grouped, subplots=True, column=None, fontsize=None,
     fontsize : int or string
     rot : label rotation angle
     grid : Setting this to True will show the grid
+    ax : Matplotlib axis object, default None
     figsize : A tuple (width, height) in inches
     layout : tuple (optional)
         (rows, columns) for the layout of the plot
@@ -3097,7 +3135,8 @@ def _subplots(naxes=None, sharex=False, sharey=False, squeeze=True,
     Keyword arguments:
 
     naxes : int
-      Number of required axes. Exceeded axes are set invisible. Default is nrows * ncols.
+      Number of required axes. Exceeded axes are set invisible. Default is
+      nrows * ncols.
 
     sharex : bool
       If True, the X axis will be shared amongst all subplots.
@@ -3224,41 +3263,11 @@ def _subplots(naxes=None, sharex=False, sharey=False, squeeze=True,
         ax = fig.add_subplot(nrows, ncols, i + 1, **kwds)
         axarr[i] = ax
 
-    if nplots > 1:
-
-        if sharex and nrows > 1:
-            for ax in axarr[:naxes][:-ncols]:    # only bottom row
-                for label in ax.get_xticklabels():
-                    label.set_visible(False)
-                try:
-                    # set_visible will not be effective if
-                    # minor axis has NullLocator and NullFormattor (default)
-                    import matplotlib.ticker as ticker
-                    ax.xaxis.set_minor_locator(ticker.AutoLocator())
-                    ax.xaxis.set_minor_formatter(ticker.FormatStrFormatter(''))
-                    for label in ax.get_xticklabels(minor=True):
-                        label.set_visible(False)
-                except Exception:   # pragma no cover
-                    pass
-                ax.xaxis.get_label().set_visible(False)
-        if sharey and ncols > 1:
-            for i, ax in enumerate(axarr):
-                if (i % ncols) != 0:  # only first column
-                    for label in ax.get_yticklabels():
-                        label.set_visible(False)
-                    try:
-                        import matplotlib.ticker as ticker
-                        ax.yaxis.set_minor_locator(ticker.AutoLocator())
-                        ax.yaxis.set_minor_formatter(ticker.FormatStrFormatter(''))
-                        for label in ax.get_yticklabels(minor=True):
-                            label.set_visible(False)
-                    except Exception:   # pragma no cover
-                        pass
-                    ax.yaxis.get_label().set_visible(False)
-
     if naxes != nplots:
         for ax in axarr[naxes:]:
             ax.set_visible(False)
+
+    _handle_shared_axes(axarr, nplots, naxes, nrows, ncols, sharex, sharey)
 
     if squeeze:
         # Reshape the array to have the final desired dimension (nrow,ncol),
@@ -3274,6 +3283,65 @@ def _subplots(naxes=None, sharex=False, sharey=False, squeeze=True,
 
     return fig, axes
 
+def _remove_xlabels_from_axis(ax):
+    for label in ax.get_xticklabels():
+        label.set_visible(False)
+    try:
+        # set_visible will not be effective if
+        # minor axis has NullLocator and NullFormattor (default)
+        import matplotlib.ticker as ticker
+
+        if isinstance(ax.xaxis.get_minor_locator(), ticker.NullLocator):
+            ax.xaxis.set_minor_locator(ticker.AutoLocator())
+        if isinstance(ax.xaxis.get_minor_formatter(), ticker.NullFormatter):
+            ax.xaxis.set_minor_formatter(ticker.FormatStrFormatter(''))
+        for label in ax.get_xticklabels(minor=True):
+            label.set_visible(False)
+    except Exception:   # pragma no cover
+        pass
+    ax.xaxis.get_label().set_visible(False)
+
+def _remove_ylables_from_axis(ax):
+    for label in ax.get_yticklabels():
+        label.set_visible(False)
+    try:
+        import matplotlib.ticker as ticker
+        if isinstance(ax.yaxis.get_minor_locator(), ticker.NullLocator):
+            ax.yaxis.set_minor_locator(ticker.AutoLocator())
+        if isinstance(ax.yaxis.get_minor_formatter(), ticker.NullFormatter):
+            ax.yaxis.set_minor_formatter(ticker.FormatStrFormatter(''))
+        for label in ax.get_yticklabels(minor=True):
+            label.set_visible(False)
+    except Exception:   # pragma no cover
+        pass
+    ax.yaxis.get_label().set_visible(False)
+
+def _handle_shared_axes(axarr, nplots, naxes, nrows, ncols, sharex, sharey):
+    if nplots > 1:
+
+        # first find out the ax layout, so that we can correctly handle 'gaps"
+        layout = np.zeros((nrows+1,ncols+1), dtype=np.bool)
+        for ax in axarr:
+            layout[ax.rowNum, ax.colNum] = ax.get_visible()
+
+        if sharex and nrows > 1:
+            for ax in axarr:
+                # only the last row of subplots should get x labels -> all other off
+                # layout handles the case that the subplot is the last in the column,
+                # because below is no subplot/gap.
+                if not layout[ax.rowNum+1, ax.colNum]:
+                    continue
+                _remove_xlabels_from_axis(ax)
+        if sharey and ncols > 1:
+            for ax in axarr:
+                # only the first column should get y labels -> set all other to off
+                # as we only have labels in teh first column and we always have a subplot there,
+                # we can skip the layout test
+                if ax.is_first_col():
+                    continue
+                _remove_ylables_from_axis(ax)
+
+
 
 def _flatten(axes):
     if not com.is_list_like(axes):
@@ -3286,11 +3354,9 @@ def _flatten(axes):
 def _get_all_lines(ax):
     lines = ax.get_lines()
 
-    # check for right_ax, which can oddly sometimes point back to ax
-    if hasattr(ax, 'right_ax') and ax.right_ax != ax:
+    if hasattr(ax, 'right_ax'):
         lines += ax.right_ax.get_lines()
 
-    # no such risk with left_ax
     if hasattr(ax, 'left_ax'):
         lines += ax.left_ax.get_lines()
 

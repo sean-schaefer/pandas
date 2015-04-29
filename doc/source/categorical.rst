@@ -13,7 +13,6 @@
    from pandas import *
    import pandas as pd
    np.set_printoptions(precision=4, suppress=True)
-   options.display.mpl_style='default'
    options.display.max_rows=15
 
 
@@ -24,11 +23,11 @@ Categorical Data
 .. versionadded:: 0.15
 
 .. note::
-    While there was in `pandas.Categorical` in earlier versions, the ability to use
+    While there was `pandas.Categorical` in earlier versions, the ability to use
     categorical data in `Series` and `DataFrame` is new.
 
 
-This is a introduction to pandas categorical data type, including a short comparison
+This is an introduction to pandas categorical data type, including a short comparison
 with R's ``factor``.
 
 `Categoricals` are a pandas data type, which correspond to categorical variables in
@@ -51,7 +50,7 @@ The categorical data type is useful in the following cases:
   variable to a categorical variable will save some memory, see :ref:`here <categorical.memory>`.
 * The lexical order of a variable is not the same as the logical order ("one", "two", "three").
   By converting to a categorical and specifying an order on the categories, sorting and
-  min/max will use the logical order instead of the lexical order.
+  min/max will use the logical order instead of the lexical order, see :ref:`here <categorical.sort>`.
 * As a signal to other python libraries that this column should be treated as a categorical
   variable (e.g. to use suitable statistical methods or plot types).
 
@@ -90,8 +89,6 @@ By using some special functions:
 See :ref:`documentation <reshaping.tile.cut>` for :func:`~pandas.cut`.
 
 By passing a :class:`pandas.Categorical` object to a `Series` or assigning it to a `DataFrame`.
-This is the only possibility to specify differently ordered categories (or no order at all) at
-creation time and the only reason to use :class:`pandas.Categorical` directly:
 
 .. ipython:: python
 
@@ -102,6 +99,14 @@ creation time and the only reason to use :class:`pandas.Categorical` directly:
     df = DataFrame({"A":["a","b","c","a"]})
     df["B"] = raw_cat
     df
+
+You can also specify differently ordered categories or make the resulting data ordered, by passing these arguments to ``astype()``:
+
+.. ipython:: python
+
+    s = Series(["a","b","c","a"])
+    s_cat = s.astype("category", categories=["b","c","d"], ordered=False)
+    s_cat
 
 Categorical data has a specific ``category`` :ref:`dtype <basics.dtypes>`:
 
@@ -176,10 +181,9 @@ It's also possible to pass in the categories in a specific order:
     s.cat.ordered
 
 .. note::
-    New categorical data is automatically ordered if the passed in values are sortable or a
-    `categories` argument is supplied. This is a difference to R's `factors`, which are unordered
-    unless explicitly told to be ordered (``ordered=TRUE``). You can of course overwrite that by
-    passing in an explicit ``ordered=False``.
+
+    New categorical data are NOT automatically ordered. You must explicity pass ``ordered=True`` to
+    indicate an ordered ``Categorical``.
 
 
 Renaming categories
@@ -236,7 +240,7 @@ which are removed are replaced by ``np.nan``.:
     s = s.cat.remove_categories([4])
     s
 
-Renaming unused categories
+Removing unused categories
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Removing unused categories can also be done:
@@ -265,24 +269,34 @@ or simply set the categories to a predefined scale, use :func:`Categorical.set_c
     intentionally or because it is misspelled or (under Python3) due to a type difference (e.g.,
     numpys S1 dtype and python strings). This can result in surprising behaviour!
 
-Ordered or not...
+Sorting and Order
 -----------------
 
+.. _categorical.sort:
+
+.. warning::
+
+   The default for construction has changed in v0.16.0 to ``ordered=False``, from the prior implicit ``ordered=True``
+
 If categorical data is ordered (``s.cat.ordered == True``), then the order of the categories has a
-meaning and certain operations are possible. If the categorical is unordered, a `TypeError` is
-raised.
+meaning and certain operations are possible. If the categorical is unordered, ``.min()/.max()`` will raise a `TypeError`.
 
 .. ipython:: python
 
     s = Series(Categorical(["a","b","c","a"], ordered=False))
-    try:
-        s.sort()
-    except TypeError as e:
-        print("TypeError: " + str(e))
-    s = Series(["a","b","c","a"], dtype="category") # ordered per default!
+    s.sort()
+    s = Series(["a","b","c","a"]).astype('category', ordered=True)
     s.sort()
     s
     s.min(), s.max()
+
+You can set categorical data to be ordered by using ``as_ordered()`` or unordered by using ``as_unordered()``. These will by
+default return a *new* object.
+
+.. ipython:: python
+
+    s.cat.as_ordered()
+    s.cat.as_unordered()
 
 Sorting will use the order defined by categories, not any lexical order present on the data type.
 This is even true for strings and numeric data:
@@ -290,20 +304,25 @@ This is even true for strings and numeric data:
 .. ipython:: python
 
     s = Series([1,2,3,1], dtype="category")
-    s.cat.categories = [2,3,1]
+    s = s.cat.set_categories([2,3,1], ordered=True)
     s
     s.sort()
     s
     s.min(), s.max()
 
+
+Reordering
+~~~~~~~~~~
+
 Reordering the categories is possible via the :func:`Categorical.reorder_categories` and
 the :func:`Categorical.set_categories` methods. For :func:`Categorical.reorder_categories`, all
-old categories must be included in the new categories and no new categories are allowed.
+old categories must be included in the new categories and no new categories are allowed. This will
+necessarily make the sort order the same as the categories order.
 
 .. ipython:: python
 
     s = Series([1,2,3,1], dtype="category")
-    s = s.cat.reorder_categories([2,3,1])
+    s = s.cat.reorder_categories([2,3,1], ordered=True)
     s
     s.sort()
     s
@@ -324,23 +343,51 @@ old categories must be included in the new categories and no new categories are 
     (e.g.``Series.median()``, which would need to compute the mean between two values if the length
     of an array is even) do not work and raise a `TypeError`.
 
+Multi Column Sorting
+~~~~~~~~~~~~~~~~~~~~
+
+A categorical dtyped column will partcipate in a multi-column sort in a similar manner to other columns.
+The ordering of the categorical is determined by the ``categories`` of that column.
+
+.. ipython:: python
+
+   dfs = DataFrame({'A' : Categorical(list('bbeebbaa'), categories=['e','a','b'], ordered=True),
+                    'B' : [1,2,1,2,2,1,2,1] })
+   dfs.sort(['A', 'B'])
+
+Reordering the ``categories`` changes a future sort.
+
+.. ipython:: python
+
+   dfs['A'] = dfs['A'].cat.reorder_categories(['a','b','e'])
+   dfs.sort(['A','B'])
 
 Comparisons
 -----------
 
-Comparing `Categoricals` with other objects is possible in two cases:
+Comparing categorical data with other objects is possible in three cases:
 
- * comparing a categorical Series to another categorical Series, when `categories` and `ordered` is
-   the same or
- * comparing a categorical Series to a scalar.
+ * comparing equality (``==`` and ``!=``) to a list-like object (list, Series, array,
+   ...) of the same length as the categorical data.
+ * all comparisons (``==``, ``!=``, ``>``, ``>=``, ``<``, and ``<=``) of categorical data to
+   another categorical Series, when ``ordered==True`` and the `categories` are the same.
+ * all comparisons of a categorical data to a scalar.
 
-All other comparisons will raise a TypeError.
+All other comparisons, especially "non-equality" comparisons of two categoricals with different
+categories or a categorical with any list-like object, will raise a TypeError.
+
+.. note::
+
+    Any "non-equality" comparisons of categorical data with a `Series`, `np.array`, `list` or
+    categorical data with different categories or ordering will raise an `TypeError` because custom
+    categories ordering could be interpreted in two ways: one with taking into account the
+    ordering and one without.
 
 .. ipython:: python
 
-    cat = Series(Categorical([1,2,3], categories=[3,2,1]))
-    cat_base = Series(Categorical([2,2,2], categories=[3,2,1]))
-    cat_base2 = Series(Categorical([2,2,2]))
+    cat = Series([1,2,3]).astype("category", categories=[3,2,1], ordered=True)
+    cat_base = Series([2,2,2]).astype("category", categories=[3,2,1], ordered=True)
+    cat_base2 = Series([2,2,2]).astype("category", ordered=True)
 
     cat
     cat_base
@@ -353,6 +400,14 @@ Comparing to a categorical with the same categories and ordering or to a scalar 
     cat > cat_base
     cat > 2
 
+Equality comparisons work with any list-like object of same length and scalars:
+
+.. ipython:: python
+
+    cat == cat_base
+    cat == np.array([1,2,3])
+    cat == 2
+
 This doesn't work because the categories are not the same:
 
 .. ipython:: python
@@ -362,13 +417,9 @@ This doesn't work because the categories are not the same:
     except TypeError as e:
          print("TypeError: " + str(e))
 
-.. note::
-
-    Comparisons with `Series`, `np.array` or a `Categorical` with different categories or ordering
-    will raise an `TypeError` because custom categories ordering could be interpreted in two ways:
-    one with taking in account the ordering and one without. If you want to compare a categorical
-    series with such a type, you need to be explicit and convert the categorical data back to the
-    original values:
+If you want to do a "non-equality" comparison of a categorical series with a list-like object
+which is not categorical data, you need to be explicit and convert the categorical data back to
+the original values:
 
 .. ipython:: python
 
@@ -420,7 +471,7 @@ Data munging
 ------------
 
 The optimized pandas data access methods  ``.loc``, ``.iloc``, ``.ix`` ``.at``, and ``.iat``,
-work as normal, the only difference is the return type (for getting) and
+work as normal. The only difference is the return type (for getting) and
 that only values already in `categories` can be assigned.
 
 Getting
@@ -541,8 +592,13 @@ The same applies to ``df.append(df_different)``.
 Getting Data In/Out
 -------------------
 
-Writing data (`Series`, `Frames`) to a HDF store that contains a ``category`` dtype will currently
-raise ``NotImplementedError``.
+.. versionadded:: 0.15.2
+
+Writing data (`Series`, `Frames`) to a HDF store that contains a ``category`` dtype was implemented
+in 0.15.2. See :ref:`here <io.hdf5-categorical>` for an example and caveats.
+
+Writing data to and reading data from *Stata* format files was implemented in
+0.15.2. See :ref:`here <io.stata-categorical>` for an example and caveats.
 
 Writing to a CSV file will convert the data, effectively removing any information about the
 categorical (categories and ordering). So if you read back the CSV file you have to convert the
@@ -620,9 +676,6 @@ The following differences to R's factor functions can be observed:
 
 * R's `levels` are named `categories`
 * R's `levels` are always of type string, while `categories` in pandas can be of any dtype.
-* New categorical data is automatically ordered if the passed in values are sortable or a
-  `categories` argument is supplied. This is a difference to R's `factors`, which are unordered
-  unless explicitly told to be ordered (``ordered=TRUE``).
 * It's not possible to specify labels at creation time. Use ``s.cat.rename_categories(new_labels)``
   afterwards.
 * In contrast to R's `factor` function, using categorical data as the sole input to create a
@@ -654,8 +707,8 @@ an ``object`` dtype is a constant times the length of the data.
 
 .. note::
 
-   If the number of categories approaches the length of the data, the ``Categorical`` will use nearly (or more) memory than an
-   equivalent ``object`` dtype representation.
+   If the number of categories approaches the length of the data, the ``Categorical`` will use nearly the same or
+   more memory than an equivalent ``object`` dtype representation.
 
    .. ipython:: python
 
@@ -721,6 +774,14 @@ Dtype comparisons work:
 
     dtype == np.str_
     np.str_ == dtype
+
+To check if a Series contains Categorical data, with pandas 0.16 or later, use
+``hasattr(s, 'cat')``:
+
+.. ipython:: python
+
+    hasattr(Series(['a'], dtype='category'), 'cat')
+    hasattr(Series(['a']), 'cat')
 
 Using `numpy` functions on a `Series` of type ``category`` should not work as `Categoricals`
 are not numeric data (even in the case that ``.categories`` is numeric).
@@ -805,4 +866,3 @@ Use ``copy=True`` to prevent such a behaviour or simply don't reuse `Categorical
     This also happens in some cases when you supply a `numpy` array instead of a `Categorical`:
     using an int array (e.g. ``np.array([1,2,3,4])``) will exhibit the same behaviour, while using
     a string array (e.g. ``np.array(["a","b","c","a"])``) will not.
-

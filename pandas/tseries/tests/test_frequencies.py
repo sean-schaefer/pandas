@@ -17,6 +17,7 @@ from pandas.tseries.period import PeriodIndex
 import pandas.compat as compat
 
 import pandas.util.testing as tm
+from pandas import Timedelta
 
 def test_to_offset_multiple():
     freqstr = '2h30min'
@@ -79,6 +80,47 @@ def test_to_offset_leading_zero():
     freqstr = '-00H 03T 14S'
     result = frequencies.to_offset(freqstr)
     assert(result.n == -194)
+
+
+def test_to_offset_pd_timedelta():
+    # Tests for #9064
+    td = Timedelta(days=1, seconds=1)
+    result = frequencies.to_offset(td)
+    expected = offsets.Second(86401)
+    assert(expected==result)
+
+    td = Timedelta(days=-1, seconds=1)
+    result = frequencies.to_offset(td)
+    expected = offsets.Second(-86399)
+    assert(expected==result)
+
+    td = Timedelta(hours=1, minutes=10)
+    result = frequencies.to_offset(td)
+    expected = offsets.Minute(70)
+    assert(expected==result)
+
+    td = Timedelta(hours=1, minutes=-10)
+    result = frequencies.to_offset(td)
+    expected = offsets.Minute(50)
+    assert(expected==result)
+
+    td = Timedelta(weeks=1)
+    result = frequencies.to_offset(td)
+    expected = offsets.Day(7)
+    assert(expected==result)
+
+    td1 = Timedelta(hours=1)
+    result1 = frequencies.to_offset(td1)
+    result2 = frequencies.to_offset('60min')
+    assert(result1 == result2)
+
+    td = Timedelta(microseconds=1)
+    result = frequencies.to_offset(td)
+    expected = offsets.Micro(1)
+    assert(expected == result)
+
+    td = Timedelta(microseconds=0)
+    tm.assertRaises(ValueError, lambda: frequencies.to_offset(td))
 
 
 def test_anchored_shortcuts():
@@ -267,6 +309,24 @@ class TestFrequencyInference(tm.TestCase):
             for expected, dates in compat.iteritems(freqs):
                 idx = DatetimeIndex(dates, tz=tz)
                 self.assertEqual(idx.inferred_freq, expected)
+
+    def test_infer_freq_tz_transition(self):
+        # Tests for #8772
+        date_pairs = [['2013-11-02', '2013-11-5'], #Fall DST
+                      ['2014-03-08', '2014-03-11'], #Spring DST
+                      ['2014-01-01', '2014-01-03']] #Regular Time
+        freqs = ['3H', '10T', '3601S', '3600001L', '3600000001U', '3600000000001N']
+
+        for tz in [None, 'Australia/Sydney', 'Asia/Tokyo', 'Europe/Paris',
+                   'US/Pacific', 'US/Eastern']:
+            for date_pair in date_pairs:
+                for freq in freqs:
+                    idx = date_range(date_pair[0], date_pair[1], freq=freq, tz=tz)
+                    print(idx)
+                    self.assertEqual(idx.inferred_freq, freq)
+                
+        index = date_range("2013-11-03", periods=5, freq="3H").tz_localize("America/Chicago")
+        self.assertIsNone(index.inferred_freq)
 
     def test_not_monotonic(self):
         rng = _dti(['1/31/2000', '1/31/2001', '1/31/2002'])

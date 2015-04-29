@@ -15,9 +15,8 @@ ts = tm.makeTimeSeries()
 dt = ts.index[500]
 """
 statement = "ts[dt]"
-
 bm_getitem = Benchmark(statement, setup, ncalls=100000,
-                       name='series_getitem_scalar')
+                       name='time_series_getitem_scalar')
 
 setup = common_setup + """
 index = tm.makeStringIndex(1000)
@@ -25,9 +24,9 @@ s = Series(np.random.rand(1000), index=index)
 idx = index[100]
 """
 statement = "s.get_value(idx)"
-bm_df_getitem3 = Benchmark(statement, setup,
-                           name='series_get_value',
-                           start_date=datetime(2011, 11, 12))
+bm_get_value = Benchmark(statement, setup,
+                         name='series_get_value',
+                         start_date=datetime(2011, 11, 12))
 
 
 setup = common_setup + """
@@ -209,3 +208,30 @@ df = DataFrame(dict( A = [ 'foo'] * 1000000))
 
 frame_iloc_big = Benchmark('df.iloc[:100,0]', setup,
                             start_date=datetime(2013, 1, 1))
+
+#----------------------------------------------------------------------
+# basic tests for [], .loc[], .iloc[] and .ix[]
+
+setup = common_setup + """
+s = Series(np.random.rand(1000000))
+"""
+
+series_getitem_scalar = Benchmark("s[800000]", setup)
+series_getitem_slice = Benchmark("s[:800000]", setup)
+series_getitem_list_like = Benchmark("s[[800000]]", setup)
+series_getitem_array = Benchmark("s[np.arange(10000)]", setup)
+
+series_loc_scalar = Benchmark("s.loc[800000]", setup)
+series_loc_slice = Benchmark("s.loc[:800000]", setup)
+series_loc_list_like = Benchmark("s.loc[[800000]]", setup)
+series_loc_array = Benchmark("s.loc[np.arange(10000)]", setup)
+
+series_iloc_scalar = Benchmark("s.iloc[800000]", setup)
+series_iloc_slice = Benchmark("s.iloc[:800000]", setup)
+series_iloc_list_like = Benchmark("s.iloc[[800000]]", setup)
+series_iloc_array = Benchmark("s.iloc[np.arange(10000)]", setup)
+
+series_ix_scalar = Benchmark("s.ix[800000]", setup)
+series_ix_slice = Benchmark("s.ix[:800000]", setup)
+series_ix_list_like = Benchmark("s.ix[[800000]]", setup)
+series_ix_array = Benchmark("s.ix[np.arange(10000)]", setup)

@@ -1,4 +1,4 @@
-
+# -*- coding: utf-8 -*-
 import nose
 from numpy import nan
 import numpy as np
@@ -7,6 +7,7 @@ from pandas.util.testing import assert_almost_equal
 import pandas.util.testing as tm
 from pandas.compat import range, lrange, zip
 import pandas.lib as lib
+import pandas._period as period
 import pandas.algos as algos
 
 
@@ -660,6 +661,24 @@ class TestTypeInference(tm.TestCase):
         result = lib.infer_dtype(arr)
         self.assertEqual(result, 'mixed')
 
+    def test_categorical(self):
+
+        # GH 8974
+        from pandas import Categorical, Series
+        arr = Categorical(list('abc'))
+        result = lib.infer_dtype(arr)
+        self.assertEqual(result, 'categorical')
+
+        result = lib.infer_dtype(Series(arr))
+        self.assertEqual(result, 'categorical')
+
+        arr = Categorical(list('abc'),categories=['cegfab'],ordered=True)
+        result = lib.infer_dtype(arr)
+        self.assertEqual(result, 'categorical')
+
+        result = lib.infer_dtype(Series(arr))
+        self.assertEqual(result, 'categorical')
+
 class TestMoments(tm.TestCase):
     pass
 
@@ -713,12 +732,10 @@ class TestTsUtil(tm.TestCase):
 class TestPeriodField(tm.TestCase):
 
     def test_get_period_field_raises_on_out_of_range(self):
-        from pandas import tslib
-        self.assertRaises(ValueError, tslib.get_period_field, -1, 0, 0)
+        self.assertRaises(ValueError, period.get_period_field, -1, 0, 0)
 
     def test_get_period_field_array_raises_on_out_of_range(self):
-        from pandas import tslib
-        self.assertRaises(ValueError, tslib.get_period_field_arr, -1, np.empty(1), 0)
+        self.assertRaises(ValueError, period.get_period_field_arr, -1, np.empty(1), 0)
 
 if __name__ == '__main__':
     import nose

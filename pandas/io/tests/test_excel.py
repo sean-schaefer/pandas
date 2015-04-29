@@ -80,6 +80,7 @@ class SharedItems(object):
         self.csv2 = os.path.join(self.dirpath, 'test2.csv')
         self.xls1 = os.path.join(self.dirpath, 'test.xls')
         self.xlsx1 = os.path.join(self.dirpath, 'test.xlsx')
+        self.multisheet = os.path.join(self.dirpath, 'test_multisheet.xlsx')
         self.frame = _frame.copy()
         self.frame2 = _frame2.copy()
         self.tsframe = _tsframe.copy()
@@ -399,6 +400,83 @@ class ExcelReaderTests(SharedItems, tm.TestCase):
                            convert_float=False)
         tm.assert_frame_equal(actual, no_convert_float)
 
+    # GH8212 - support for converters and missing values
+    def test_reader_converters(self):
+        _skip_if_no_xlrd()
+
+        expected = DataFrame.from_items([
+            ("IntCol", [1, 2, -3, -1000, 0]),
+            ("FloatCol", [12.5, np.nan, 18.3, 19.2, 0.000000005]),
+            ("BoolCol", ['Found', 'Found', 'Found', 'Not found', 'Found']),
+            ("StrCol", ['1', np.nan, '3', '4', '5']),
+        ])
+
+        converters = {'IntCol': lambda x: int(x) if x != '' else -1000,
+                      'FloatCol': lambda x: 10 * x if x else np.nan,
+                      2: lambda x: 'Found' if x != '' else 'Not found',
+                      3: lambda x: str(x) if x else '',
+                      }
+
+        xlsx_path = os.path.join(self.dirpath, 'test_converters.xlsx')
+        xls_path = os.path.join(self.dirpath, 'test_converters.xls')
+
+        # should read in correctly and set types of single cells (not array dtypes)
+        for path in (xls_path, xlsx_path):
+            actual = read_excel(path, 'Sheet1', converters=converters)
+            tm.assert_frame_equal(actual, expected)
+    
+    def test_reading_all_sheets(self):
+        # Test reading all sheetnames by setting sheetname to None,
+        # Ensure a dict is returned.
+        # See PR #9450
+    
+        _skip_if_no_xlrd()
+        
+        dfs = read_excel(self.multisheet,sheetname=None)
+        expected_keys = ['Alpha','Beta','Charlie']
+        tm.assert_contains_all(expected_keys,dfs.keys())
+
+    def test_reading_multiple_specific_sheets(self):
+        # Test reading specific sheetnames by specifying a mixed list 
+        # of integers and strings, and confirm that duplicated sheet
+        # references (positions/names) are removed properly.
+        
+        # Ensure a dict is returned
+        # See PR #9450
+        _skip_if_no_xlrd()
+        
+        #Explicitly request duplicates.  Only the set should be returned.
+        expected_keys = [2,'Charlie','Charlie']
+        dfs = read_excel(self.multisheet,sheetname=expected_keys)
+        expected_keys = list(set(expected_keys))
+        tm.assert_contains_all(expected_keys,dfs.keys())
+        assert len(expected_keys) == len(dfs.keys())
+
+    def test_creating_and_reading_multiple_sheets(self):
+        # Test reading multiple sheets, from a runtime created excel file
+        # with multiple sheets.
+         # See PR #9450       
+    
+        _skip_if_no_xlrd()
+        _skip_if_no_xlwt()
+               
+        def tdf(sheetname):
+            d, i = [11,22,33], [1,2,3]
+            return DataFrame(d,i,columns=[sheetname])
+        
+        sheets = ['AAA','BBB','CCC']
+        
+        dfs = [tdf(s) for s in sheets]
+        dfs = dict(zip(sheets,dfs))
+  
+        with ensure_clean('.xlsx') as pth:
+            with ExcelWriter(pth) as ew:
+                for sheetname, df in dfs.iteritems():
+                    df.to_excel(ew,sheetname)
+            dfs_returned = pd.read_excel(pth,sheetname=sheets)
+            for s in sheets:
+                tm.assert_frame_equal(dfs[s],dfs_returned[s])
+    
     def test_reader_seconds(self):
         # Test reading times with and without milliseconds. GH5945.
         _skip_if_no_xlrd()
@@ -477,14 +555,6 @@ class ExcelWriterBase(SharedItems):
             tm.assert_frame_equal(gt, df)
 
             self.assertRaises(xlrd.XLRDError, xl.parse, '0')
-
-    def test_excel_deprecated_options(self):
-        with ensure_clean(self.ext) as path:
-            with tm.assert_produces_warning(FutureWarning):
-                self.frame.to_excel(path, 'test1', cols=['A', 'B'])
-
-            with tm.assert_produces_warning(False):
-                self.frame.to_excel(path, 'test1', columns=['A', 'B'])
 
     def test_excelwriter_contextmanager(self):
         _skip_if_no_xlrd()
@@ -1062,31 +1132,29 @@ class ExcelWriterBase(SharedItems):
 
         nrows = 5
         ncols = 3
+        for use_headers in (True, False):
+            for i in range(1, 4):  # row multindex upto nlevel=3
+                for j in range(1, 4):  # col ""
+                    df = mkdf(nrows, ncols, r_idx_nlevels=i, c_idx_nlevels=j)
 
-        for i in range(1, 4):  # row multindex upto nlevel=3
-            for j in range(1, 4):  # col ""
-                df = mkdf(nrows, ncols, r_idx_nlevels=i, c_idx_nlevels=j)
-                res = roundtrip(df)
-                # shape
-                self.assertEqual(res.shape, (nrows, ncols + i))
+                    #this if will be removed once multi column excel writing
+                    #is implemented for now fixing #9794
+                    if j>1:
+                        with tm.assertRaises(NotImplementedError):
+                            res = roundtrip(df, use_headers)
+                    else:
+                        res = roundtrip(df, use_headers)
 
-                # no nans
-                for r in range(len(res.index)):
-                    for c in range(len(res.columns)):
-                        self.assertTrue(res.ix[r, c] is not np.nan)
+                    if use_headers:
+                        self.assertEqual(res.shape, (nrows, ncols + i))
+                    else:
+                        # first row taken as columns
+                        self.assertEqual(res.shape, (nrows - 1, ncols + i))
 
-        for i in range(1, 4):  # row multindex upto nlevel=3
-            for j in range(1, 4):  # col ""
-                df = mkdf(nrows, ncols, r_idx_nlevels=i, c_idx_nlevels=j)
-                res = roundtrip(df, False)
-                # shape
-                self.assertEqual(res.shape, (
-                    nrows - 1, ncols + i))  # first row taken as columns
-
-                # no nans
-                for r in range(len(res.index)):
-                    for c in range(len(res.columns)):
-                        self.assertTrue(res.ix[r, c] is not np.nan)
+                    # no nans
+                    for r in range(len(res.index)):
+                        for c in range(len(res.columns)):
+                            self.assertTrue(res.ix[r, c] is not np.nan)
 
         res = roundtrip(DataFrame([0]))
         self.assertEqual(res.shape, (1, 1))
@@ -1126,6 +1194,29 @@ class ExcelWriterBase(SharedItems):
             tm.assert_series_equal(write_frame['A'], read_frame['A'])
             tm.assert_series_equal(write_frame['B'], read_frame['B'])
 
+    def test_datetimes(self):
+
+        # Test writing and reading datetimes. For issue #9139. (xref #9185)
+        _skip_if_no_xlrd()
+
+        datetimes = [datetime(2013, 1, 13, 1, 2, 3),
+                     datetime(2013, 1, 13, 2, 45, 56),
+                     datetime(2013, 1, 13, 4, 29, 49),
+                     datetime(2013, 1, 13, 6, 13, 42),
+                     datetime(2013, 1, 13, 7, 57, 35),
+                     datetime(2013, 1, 13, 9, 41, 28),
+                     datetime(2013, 1, 13, 11, 25, 21),
+                     datetime(2013, 1, 13, 13, 9, 14),
+                     datetime(2013, 1, 13, 14, 53, 7),
+                     datetime(2013, 1, 13, 16, 37, 0),
+                     datetime(2013, 1, 13, 18, 20, 52)]
+
+        with ensure_clean(self.ext) as path:
+            write_frame = DataFrame.from_items([('A', datetimes)])
+            write_frame.to_excel(path, 'Sheet1')
+            read_frame = read_excel(path, 'Sheet1', header=0)
+
+            tm.assert_series_equal(write_frame['A'], read_frame['A'])
 
 def raise_wrapper(major_ver):
     def versioned_raise_wrapper(orig_method):
@@ -1301,6 +1392,29 @@ class XlwtTests(ExcelWriterBase, tm.TestCase):
     engine_name = 'xlwt'
     check_skip = staticmethod(_skip_if_no_xlwt)
 
+    def test_excel_raise_not_implemented_error_on_multiindex_columns(self):
+        _skip_if_no_xlwt()
+        #MultiIndex as columns is not yet implemented 9794
+        cols = pd.MultiIndex.from_tuples([('site',''),
+                                          ('2014','height'),
+                                          ('2014','weight')])
+        df = pd.DataFrame(np.random.randn(10,3), columns=cols)
+        with tm.assertRaises(NotImplementedError):
+            with ensure_clean(self.ext) as path:
+                df.to_excel(path, index=False)
+
+    def test_excel_multiindex_index(self):
+        _skip_if_no_xlwt()
+        #MultiIndex as index works so assert no error #9794
+        cols = pd.MultiIndex.from_tuples([('site',''),
+                                          ('2014','height'),
+                                          ('2014','weight')])
+        df = pd.DataFrame(np.random.randn(3,10), index=cols)
+        with ensure_clean(self.ext) as path:
+            df.to_excel(path, index=False)
+
+
+
     def test_to_excel_styleconverter(self):
         _skip_if_no_xlwt()
 
@@ -1327,6 +1441,47 @@ class XlsxWriterTests(ExcelWriterBase, tm.TestCase):
     ext = '.xlsx'
     engine_name = 'xlsxwriter'
     check_skip = staticmethod(_skip_if_no_xlsxwriter)
+
+    def test_column_format(self):
+        # Test that column formats are applied to cells. Test for issue #9167.
+        # Applicable to xlsxwriter only.
+        _skip_if_no_xlsxwriter()
+
+        import warnings
+        with warnings.catch_warnings():
+            # Ignore the openpyxl lxml warning.
+            warnings.simplefilter("ignore")
+            _skip_if_no_openpyxl()
+            import openpyxl
+
+        with ensure_clean(self.ext) as path:
+            frame = DataFrame({'A': [123456, 123456],
+                               'B': [123456, 123456]})
+
+            writer = ExcelWriter(path)
+            frame.to_excel(writer)
+
+            # Add a number format to col B and ensure it is applied to cells.
+            num_format = '#,##0'
+            write_workbook = writer.book
+            write_worksheet = write_workbook.worksheets()[0]
+            col_format = write_workbook.add_format({'num_format': num_format})
+            write_worksheet.set_column('B:B', None, col_format)
+            writer.save()
+
+            read_workbook = openpyxl.load_workbook(path)
+            read_worksheet = read_workbook.get_sheet_by_name(name='Sheet1')
+
+            # Get the number format from the cell. This method is backward
+            # compatible with older versions of openpyxl.
+            cell = read_worksheet.cell('B2')
+
+            try:
+                read_num_format = cell.style.number_format._format_code
+            except:
+                read_num_format = cell.style.number_format
+
+            self.assertEqual(read_num_format, num_format)
 
 
 class OpenpyxlTests_NoMerge(ExcelWriterBase, tm.TestCase):

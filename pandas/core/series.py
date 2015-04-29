@@ -13,7 +13,7 @@ from numpy import nan, ndarray
 import numpy as np
 import numpy.ma as ma
 
-from pandas.core.common import (isnull, notnull, _is_bool_indexer,
+from pandas.core.common import (isnull, notnull, is_bool_indexer,
                                 _default_index, _maybe_upcast,
                                 _asarray_tuplesafe, _infer_dtype_from_scalar,
                                 is_list_like, _values_from_object,
@@ -24,16 +24,18 @@ from pandas.core.common import (isnull, notnull, _is_bool_indexer,
                                 _maybe_box_datetimelike, ABCDataFrame)
 from pandas.core.index import (Index, MultiIndex, InvalidIndexError,
                                _ensure_index)
-from pandas.core.indexing import _check_bool_indexer, _maybe_convert_indices
+from pandas.core.indexing import check_bool_indexer, maybe_convert_indices
 from pandas.core import generic, base
 from pandas.core.internals import SingleBlockManager
-from pandas.core.categorical import Categorical
+from pandas.core.categorical import Categorical, CategoricalAccessor
+from pandas.tseries.common import (maybe_to_datetimelike,
+                                   CombinedDatetimelikeProperties)
 from pandas.tseries.index import DatetimeIndex
 from pandas.tseries.tdi import TimedeltaIndex
 from pandas.tseries.period import PeriodIndex, Period
 from pandas import compat
 from pandas.util.terminal import get_terminal_size
-from pandas.compat import zip, u, OrderedDict
+from pandas.compat import zip, u, OrderedDict, StringIO
 
 import pandas.core.ops as ops
 from pandas.core.algorithms import select_n
@@ -59,7 +61,8 @@ _shared_doc_kwargs = dict(
     klass='Series',
     axes_single_arg="{0,'index'}",
     inplace="""inplace : boolean, default False
-            If True, performs operation inplace and returns None."""
+            If True, performs operation inplace and returns None.""",
+    duplicated='Series'
 )
 
 
@@ -109,6 +112,7 @@ class Series(base.IndexOpsMixin, generic.NDFrame):
         Copy input data
     """
     _metadata = ['name']
+    _accessors = frozenset(['dt', 'cat', 'str'])
     _allow_index_ops = True
 
     def __init__(self, data=None, index=None, dtype=None, name=None,
@@ -136,7 +140,8 @@ class Series(base.IndexOpsMixin, generic.NDFrame):
                 dtype = self._validate_dtype(dtype)
 
             if isinstance(data, MultiIndex):
-                raise NotImplementedError
+                raise NotImplementedError("initializing a Series from a "
+                                          "MultiIndex is not supported")
             elif isinstance(data, Index):
                 # need to copy to avoid aliasing issues
                 if name is None:
@@ -183,7 +188,8 @@ class Series(base.IndexOpsMixin, generic.NDFrame):
                     raise ValueError("cannot specify a dtype with a Categorical")
                 if name is None:
                     name = data.name
-            elif isinstance(data, types.GeneratorType):
+            elif (isinstance(data, types.GeneratorType) or
+                  (compat.PY3 and isinstance(data, map))):
                 data = list(data)
             elif isinstance(data, (set, frozenset)):
                 raise TypeError("{0!r} type is unordered"
@@ -229,6 +235,11 @@ class Series(base.IndexOpsMixin, generic.NDFrame):
     @property
     def _constructor(self):
         return Series
+
+    @property
+    def _constructor_expanddim(self):
+        from pandas.core.frame import DataFrame
+        return DataFrame
 
     # types
     @property
@@ -486,7 +497,7 @@ class Series(base.IndexOpsMixin, generic.NDFrame):
             raise
         except:
             if isinstance(i, slice):
-                indexer = self.index._convert_slice_indexer(i, typ='iloc')
+                indexer = self.index._convert_slice_indexer(i, kind='iloc')
                 return self._get_values(indexer)
             else:
                 label = self.index[i]
@@ -499,8 +510,8 @@ class Series(base.IndexOpsMixin, generic.NDFrame):
     def _is_mixed_type(self):
         return False
 
-    def _slice(self, slobj, axis=0, typ=None):
-        slobj = self.index._convert_slice_indexer(slobj, typ=typ or 'getitem')
+    def _slice(self, slobj, axis=0, kind=None):
+        slobj = self.index._convert_slice_indexer(slobj, kind=kind or 'getitem')
         return self._get_values(slobj)
 
     def __getitem__(self, key):
@@ -526,12 +537,12 @@ class Series(base.IndexOpsMixin, generic.NDFrame):
                 pass
             elif key is Ellipsis:
                 return self
-            elif _is_bool_indexer(key):
+            elif is_bool_indexer(key):
                 pass
             else:
 
                 # we can try to coerce the indexer (or this will raise)
-                new_key = self.index._convert_scalar_indexer(key)
+                new_key = self.index._convert_scalar_indexer(key,kind='getitem')
                 if type(new_key) != type(key):
                     return self.__getitem__(new_key)
                 raise
@@ -542,15 +553,15 @@ class Series(base.IndexOpsMixin, generic.NDFrame):
         if com.is_iterator(key):
             key = list(key)
 
-        if _is_bool_indexer(key):
-            key = _check_bool_indexer(self.index, key)
+        if is_bool_indexer(key):
+            key = check_bool_indexer(self.index, key)
 
         return self._get_with(key)
 
     def _get_with(self, key):
         # other: fancy integer or otherwise
         if isinstance(key, slice):
-            indexer = self.index._convert_slice_indexer(key, typ='getitem')
+            indexer = self.index._convert_slice_indexer(key, kind='getitem')
             return self._get_values(indexer)
         elif isinstance(key, ABCDataFrame):
             raise TypeError('Indexing a Series with DataFrame is not supported, '\
@@ -635,7 +646,7 @@ class Series(base.IndexOpsMixin, generic.NDFrame):
                 elif key is Ellipsis:
                     self[:] = value
                     return
-                elif _is_bool_indexer(key):
+                elif is_bool_indexer(key):
                     pass
                 elif com.is_timedelta64_dtype(self.dtype):
                     # reassign a null value to iNaT
@@ -660,8 +671,8 @@ class Series(base.IndexOpsMixin, generic.NDFrame):
                 if 'unorderable' in str(e):  # pragma: no cover
                     raise IndexError(key)
 
-            if _is_bool_indexer(key):
-                key = _check_bool_indexer(self.index, key)
+            if is_bool_indexer(key):
+                key = check_bool_indexer(self.index, key)
                 try:
                     self.where(~key, value, inplace=True)
                     return
@@ -688,7 +699,7 @@ class Series(base.IndexOpsMixin, generic.NDFrame):
     def _set_with(self, key, value):
         # other: fancy integer or otherwise
         if isinstance(key, slice):
-            indexer = self.index._convert_slice_indexer(key, typ='getitem')
+            indexer = self.index._convert_slice_indexer(key, kind='getitem')
             return self._set_values(indexer, value)
         else:
             if isinstance(key, tuple):
@@ -877,43 +888,16 @@ class Series(base.IndexOpsMixin, generic.NDFrame):
         Invoked by unicode(df) in py2 only. Yields a Unicode String in both
         py2/py3.
         """
+        buf = StringIO(u(""))
         width, height = get_terminal_size()
         max_rows = (height if get_option("display.max_rows") == 0
                     else get_option("display.max_rows"))
-        if max_rows and len(self.index) > max_rows:
-            result = self._tidy_repr(min(30, max_rows - 4))
-        elif len(self.index) > 0:
-            result = self._get_repr(print_header=True,
-                                    length=len(self) > 50,
-                                    name=True,
-                                    dtype=True)
-        elif self.name is None:
-            result = u('Series([], dtype: %s)') % (self.dtype)
-        else:
-            result = u('Series([], name: %s, dtype: %s)') % (self.name,
-                                                             self.dtype)
+
+        self.to_string(buf=buf, name=self.name, dtype=self.dtype,
+                       max_rows=max_rows)
+        result = buf.getvalue()
+
         return result
-
-    def _tidy_repr(self, max_vals=20):
-        """
-
-        Internal function, should always return unicode string
-        """
-        if max_vals > 1:
-            num = max_vals // 2
-        else:
-            num = 1
-            max_vals = 2
-        head = self.iloc[:num]._get_repr(print_header=True, length=False,
-                                         dtype=False, name=False)
-        tail = self.iloc[-(max_vals - num):]._get_repr(print_header=False,
-                                                       length=False,
-                                                       name=False,
-                                                       dtype=False)
-        result = head + '\n...\n' + tail
-        result = '%s\n%s' % (result, self._repr_footer())
-
-        return compat.text_type(result)
 
     def _repr_footer(self):
 
@@ -942,8 +926,8 @@ class Series(base.IndexOpsMixin, generic.NDFrame):
                                                len(self),
                                                str(self.dtype.name))
 
-    def to_string(self, buf=None, na_rep='NaN', float_format=None,
-                  length=False, dtype=False, name=False):
+    def to_string(self, buf=None, na_rep='NaN', float_format=None, header=True,
+                  length=False, dtype=False, name=False, max_rows=None):
         """
         Render a string representation of the Series
 
@@ -956,12 +940,17 @@ class Series(base.IndexOpsMixin, generic.NDFrame):
         float_format : one-parameter function, optional
             formatter function to apply to columns' elements if they are floats
             default None
+        header: boolean, default True
+            Add the Series header (index name)
         length : boolean, default False
             Add the Series length
         dtype : boolean, default False
             Add the Series dtype
         name : boolean, default False
-            Add the Series name (which may be None)
+            Add the Series name if not None
+        max_rows : int, optional
+            Maximum number of rows to show before truncating. If None, show
+            all.
 
         Returns
         -------
@@ -969,7 +958,8 @@ class Series(base.IndexOpsMixin, generic.NDFrame):
         """
 
         the_repr = self._get_repr(float_format=float_format, na_rep=na_rep,
-                                  length=length, dtype=dtype, name=name)
+                                  header=header, length=length, dtype=dtype,
+                                  name=name, max_rows=max_rows)
 
         # catch contract violations
         if not isinstance(the_repr, compat.text_type):
@@ -987,17 +977,18 @@ class Series(base.IndexOpsMixin, generic.NDFrame):
                     f.write(the_repr)
 
     def _get_repr(
-        self, name=False, print_header=False, length=True, dtype=True,
-            na_rep='NaN', float_format=None):
+        self, name=False, header=True, length=True, dtype=True, na_rep='NaN',
+            float_format=None, max_rows=None):
         """
 
         Internal function, should always return unicode string
         """
-
-        formatter = fmt.SeriesFormatter(self, name=name, header=print_header,
-                                        length=length, dtype=dtype,
+        formatter = fmt.SeriesFormatter(self, name=name,
+                                        length=length, header=header,
+                                        dtype=dtype,
                                         na_rep=na_rep,
-                                        float_format=float_format)
+                                        float_format=float_format,
+                                        max_rows=max_rows)
         result = formatter.to_string()
 
         # TODO: following check prob. not neces.
@@ -1061,11 +1052,10 @@ class Series(base.IndexOpsMixin, generic.NDFrame):
         -------
         data_frame : DataFrame
         """
-        from pandas.core.frame import DataFrame
         if name is None:
-            df = DataFrame(self)
+            df = self._constructor_expanddim(self)
         else:
-            df = DataFrame({name: self})
+            df = self._constructor_expanddim({name: self})
 
         return df
 
@@ -1331,15 +1321,20 @@ class Series(base.IndexOpsMixin, generic.NDFrame):
         result = com.diff(_values_from_object(self), periods)
         return self._constructor(result, index=self.index).__finalize__(self)
 
-    def autocorr(self):
+    def autocorr(self, lag=1):
         """
-        Lag-1 autocorrelation
+        Lag-N autocorrelation
+
+        Parameters
+        ----------
+        lag : int, default 1
+            Number of lags to apply before performing autocorrelation.
 
         Returns
         -------
         autocorr : float
         """
-        return self.corr(self.shift(1))
+        return self.corr(self.shift(lag))
 
     def dot(self, other):
         """
@@ -2040,7 +2035,8 @@ class Series(base.IndexOpsMixin, generic.NDFrame):
         y : Series or DataFrame if func returns a Series
         """
         if len(self) == 0:
-            return Series()
+            return self._constructor(dtype=self.dtype,
+                                     index=self.index).__finalize__(self)
 
         if kwds or args and not isinstance(func, np.ufunc):
             f = lambda x: func(x, *args, **kwds)
@@ -2103,7 +2099,7 @@ class Series(base.IndexOpsMixin, generic.NDFrame):
             boxer = com.i8_boxer(self)
 
             if len(values) == 0:
-                return boxer(iNaT)
+                return boxer(tslib.iNaT)
 
             values = values.view('i8')
             result = func(values)
@@ -2172,7 +2168,7 @@ class Series(base.IndexOpsMixin, generic.NDFrame):
         """
         # check/convert indicies here
         if convert:
-            indices = _maybe_convert_indices(
+            indices = maybe_convert_indices(
                 indices, len(self._get_axis(axis)))
 
         indices = com._ensure_platform_int(indices)
@@ -2314,7 +2310,7 @@ class Series(base.IndexOpsMixin, generic.NDFrame):
     def to_csv(self, path, index=True, sep=",", na_rep='',
                float_format=None, header=False,
                index_label=None, mode='w', nanRep=None, encoding=None,
-               date_format=None):
+               date_format=None, decimal='.'):
         """
         Write Series to a comma-separated values (csv) file
 
@@ -2342,6 +2338,8 @@ class Series(base.IndexOpsMixin, generic.NDFrame):
             non-ascii, for python versions prior to 3
         date_format: string, default None
             Format string for datetime objects.
+        decimal: string, default '.'
+            Character recognized as decimal separator. E.g. use ',' for European data
         """
         from pandas.core.frame import DataFrame
         df = DataFrame(self)
@@ -2349,7 +2347,7 @@ class Series(base.IndexOpsMixin, generic.NDFrame):
         result = df.to_csv(path, index=index, sep=sep, na_rep=na_rep,
                   float_format=float_format, header=header,
                   index_label=index_label, mode=mode, nanRep=nanRep,
-                  encoding=encoding, date_format=date_format)
+                  encoding=encoding, date_format=date_format, decimal=decimal)
         if path is None:
             return result
 
@@ -2363,6 +2361,11 @@ class Series(base.IndexOpsMixin, generic.NDFrame):
         inplace : boolean, default False
             Do operation in place.
         """
+        kwargs.pop('how', None)
+        if kwargs:
+            raise TypeError('dropna() got an unexpected keyword '
+                    'argument "{0}"'.format(list(kwargs.keys())[0]))
+
         axis = self._get_axis_number(axis or 0)
         result = remove_na(self)
         if inplace:
@@ -2450,11 +2453,6 @@ class Series(base.IndexOpsMixin, generic.NDFrame):
         new_values = com.take_1d(values, locs)
         return self._constructor(new_values, index=where).__finalize__(self)
 
-    @cache_readonly
-    def str(self):
-        from pandas.core.strings import StringMethods
-        return StringMethods(self)
-
     def to_timestamp(self, freq=None, how='start', copy=True):
         """
         Cast to datetimeindex of timestamps, at *beginning* of period
@@ -2503,23 +2501,40 @@ class Series(base.IndexOpsMixin, generic.NDFrame):
     #------------------------------------------------------------------------------
     # Datetimelike delegation methods
 
-    @cache_readonly
-    def dt(self):
-        from pandas.tseries.common import maybe_to_datetimelike
+    def _make_dt_accessor(self):
         try:
             return maybe_to_datetimelike(self)
-        except (Exception):
-            raise TypeError("Can only use .dt accessor with datetimelike values")
+        except Exception:
+            raise AttributeError("Can only use .dt accessor with datetimelike "
+                                 "values")
+
+    dt = base.AccessorProperty(CombinedDatetimelikeProperties, _make_dt_accessor)
 
     #------------------------------------------------------------------------------
     # Categorical methods
 
-    @cache_readonly
-    def cat(self):
-        from pandas.core.categorical import CategoricalAccessor
+    def _make_cat_accessor(self):
         if not com.is_categorical_dtype(self.dtype):
-            raise TypeError("Can only use .cat accessor with a 'category' dtype")
+            raise AttributeError("Can only use .cat accessor with a "
+                                 "'category' dtype")
         return CategoricalAccessor(self.values, self.index)
+
+    cat = base.AccessorProperty(CategoricalAccessor, _make_cat_accessor)
+
+    def _dir_deletions(self):
+        return self._accessors
+
+    def _dir_additions(self):
+        rv = set()
+        # these accessors are mutually exclusive, so break loop when one exists
+        for accessor in self._accessors:
+            try:
+                getattr(self, accessor)
+                rv.add(accessor)
+                break
+            except AttributeError:
+                pass
+        return rv
 
 Series._setup_axes(['index'], info_axis=0, stat_axis=0,
                    aliases={'rows': 0})
@@ -2594,8 +2609,9 @@ def _sanitize_array(data, index, dtype=None, copy=False,
 
     # GH #846
     if isinstance(data, (np.ndarray, Index, Series)):
-        subarr = np.array(data, copy=False)
+
         if dtype is not None:
+            subarr = np.array(data, copy=False)
 
             # possibility of nan -> garbage
             if com.is_float_dtype(data.dtype) and com.is_integer_dtype(dtype):

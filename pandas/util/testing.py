@@ -24,12 +24,7 @@ import numpy as np
 from numpy.testing import assert_array_equal
 
 import pandas as pd
-from pandas.core.common import _is_sequence, array_equivalent
-import pandas.core.index as index
-import pandas.core.series as series
-import pandas.core.frame as frame
-import pandas.core.panel as panel
-import pandas.core.panel4d as panel4d
+from pandas.core.common import is_sequence, array_equivalent, is_list_like
 import pandas.compat as compat
 from pandas.compat import(
     filter, map, zip, range, unichr, lrange, lmap, lzip, u, callable, Counter,
@@ -38,22 +33,11 @@ from pandas.compat import(
 
 from pandas.computation import expressions as expr
 
-from pandas import bdate_range
-from pandas.tseries.index import DatetimeIndex
-from pandas.tseries.tdi import TimedeltaIndex
-from pandas.tseries.period import PeriodIndex
-
+from pandas import (bdate_range, CategoricalIndex, DatetimeIndex, TimedeltaIndex, PeriodIndex,
+                    Index, MultiIndex, Series, DataFrame, Panel, Panel4D)
+from pandas.util.decorators import deprecate
 from pandas import _testing
-
-
 from pandas.io.common import urlopen
-
-Index = index.Index
-MultiIndex = index.MultiIndex
-Series = series.Series
-DataFrame = frame.DataFrame
-Panel = panel.Panel
-Panel4D = panel4d.Panel4D
 
 N = 30
 K = 4
@@ -72,13 +56,15 @@ def reset_testing_mode():
     if 'deprecate' in testing_mode:
         warnings.simplefilter('ignore', DeprecationWarning)
 
+
 set_testing_mode()
+
 
 class TestCase(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        pd.set_option('chained_assignment','raise')
+        pd.set_option('chained_assignment', 'raise')
 
     @classmethod
     def tearDownClass(cls):
@@ -86,19 +72,7 @@ class TestCase(unittest.TestCase):
 
     def reset_display_options(self):
         # reset the display options
-        pd.reset_option('^display.',silent=True)
-
-    def assert_numpy_array_equal(self, np_array, assert_equal):
-        """Checks that 'np_array' is equal to 'assert_equal'
-
-        Note that the expected array should not contain `np.nan`! Two numpy arrays are equal if all
-        elements are equal, which is not possible if `np.nan` is such an element!
-
-        If the expected array includes `np.nan` use `assert_numpy_array_equivalent(...)`.
-        """
-        if np.array_equal(np_array, assert_equal):
-            return
-        raise AssertionError('{0} is not equal to {1}.'.format(np_array, assert_equal))
+        pd.reset_option('^display.', silent=True)
 
     def round_trip_pickle(self, obj, path=None):
         if path is None:
@@ -107,81 +81,22 @@ class TestCase(unittest.TestCase):
             pd.to_pickle(obj, path)
             return pd.read_pickle(path)
 
-    def assert_numpy_array_equivalent(self, np_array, assert_equal, strict_nan=False):
-        """Checks that 'np_array' is equivalent to 'assert_equal'
+    # https://docs.python.org/3/library/unittest.html#deprecated-aliases
+    def assertEquals(self, *args, **kwargs):
+        return deprecate('assertEquals', self.assertEqual)(*args, **kwargs)
 
-        Two numpy arrays are equivalent if the arrays have equal non-NaN elements, and
-        `np.nan` in corresponding locations.
+    def assertNotEquals(self, *args, **kwargs):
+        return deprecate('assertNotEquals', self.assertNotEqual)(*args, **kwargs)
 
-        If the the expected array does not contain `np.nan` `assert_numpy_array_equivalent` is the
-        similar to `assert_numpy_array_equal()`. If the expected array includes `np.nan` use this
-        function.
-        """
-        if array_equivalent(np_array, assert_equal, strict_nan=strict_nan):
-            return
-        raise AssertionError('{0} is not equivalent to {1}.'.format(np_array, assert_equal))
+    def assert_(self, *args, **kwargs):
+        return deprecate('assert_', self.assertTrue)(*args, **kwargs)
 
-    def assert_categorical_equal(self, res, exp):
-        if not array_equivalent(res.categories, exp.categories):
-            raise AssertionError('categories not equivalent: {0} vs {1}.'.format(res.categories,
-                                                                                 exp.categories))
-        if not array_equivalent(res.codes, exp.codes):
-            raise AssertionError('codes not equivalent: {0} vs {1}.'.format(res.codes,
-                                                                            exp.codes))
-        self.assertEqual(res.ordered, exp.ordered, "ordered not the same")
-        self.assertEqual(res.name, exp.name, "name not the same")
+    def assertAlmostEquals(self, *args, **kwargs):
+        return deprecate('assertAlmostEquals', self.assertAlmostEqual)(*args, **kwargs)
 
-    def assertIs(self, first, second, msg=''):
-        """Checks that 'first' is 'second'"""
-        a, b = first, second
-        assert a is b, "%s: %r is not %r" % (msg.format(a,b), a, b)
+    def assertNotAlmostEquals(self, *args, **kwargs):
+        return deprecate('assertNotAlmostEquals', self.assertNotAlmostEqual)(*args, **kwargs)
 
-    def assertIsNot(self, first, second, msg=''):
-        """Checks that 'first' is not 'second'"""
-        a, b = first, second
-        assert a is not b, "%s: %r is %r" % (msg.format(a,b), a, b)
-
-    def assertIsNone(self, expr, msg=''):
-        """Checks that 'expr' is None"""
-        self.assertIs(expr, None, msg)
-
-    def assertIsNotNone(self, expr, msg=''):
-        """Checks that 'expr' is not None"""
-        self.assertIsNot(expr, None, msg)
-
-    def assertIn(self, first, second, msg=''):
-        """Checks that 'first' is in 'second'"""
-        a, b = first, second
-        assert a in b, "%s: %r is not in %r" % (msg.format(a,b), a, b)
-
-    def assertNotIn(self, first, second, msg=''):
-        """Checks that 'first' is not in 'second'"""
-        a, b = first, second
-        assert a not in b, "%s: %r is in %r" % (msg.format(a,b), a, b)
-
-    def assertIsInstance(self, obj, cls, msg=''):
-        """Test that obj is an instance of cls
-        (which can be a class or a tuple of classes,
-        as supported by isinstance())."""
-        assert isinstance(obj, cls), (
-            "%sExpected object to be of type %r, found %r instead" % (
-                msg, cls, type(obj)))
-
-    def assertNotIsInstance(self, obj, cls, msg=''):
-        """Test that obj is not an instance of cls
-        (which can be a class or a tuple of classes,
-        as supported by isinstance())."""
-        assert not isinstance(obj, cls), (
-            "%sExpected object to be of type %r, found %r instead" % (
-                msg, cls, type(obj)))
-
-    def assertRaises(self, _exception, _callable=None, *args, **kwargs):
-        """ compat with 2.6; assert that an exception is raised """
-        assertRaises(_exception, _callable, *args, **kwargs)
-
-    def assertRaisesRegexp(self, _exception, _regexp, _callable=None, *args, **kwargs):
-        """ Port of assertRaisesRegexp from unittest in Python 2.7 - used in with statement """
-        assertRaisesRegexp(_exception, _regexp, _callable, *args, **kwargs)
 
 # NOTE: don't pass an NDFrame or index to this function - may not handle it
 # well.
@@ -256,6 +171,12 @@ def close(fignum=None):
     else:
         _close(fignum)
 
+
+def _skip_if_32bit():
+    import nose
+    import struct
+    if struct.calcsize("P") * 8 < 64:
+        raise nose.SkipTest("skipping for 32 bit")
 
 def mplskip(cls):
     """Skip a TestCase instance if matplotlib isn't installed"""
@@ -393,19 +314,21 @@ def get_locales(prefix=None, normalize=True,
         # raw_locales is "\n" seperated list of locales
         # it may contain non-decodable parts, so split
         # extract what we can and then rejoin.
-        raw_locales = []
+        raw_locales = raw_locales.split(b'\n')
+        out_locales = []
         for x in raw_locales:
-            try:
-                raw_locales.append(str(x, encoding=pd.options.display.encoding))
-            except:
-                pass
+            if compat.PY3:
+                out_locales.append(str(x, encoding=pd.options.display.encoding))
+            else:
+                out_locales.append(str(x))
+
     except TypeError:
         pass
 
     if prefix is None:
-        return _valid_locales(raw_locales, normalize)
+        return _valid_locales(out_locales, normalize)
 
-    found = re.compile('%s.*' % prefix).findall('\n'.join(raw_locales))
+    found = re.compile('%s.*' % prefix).findall('\n'.join(out_locales))
     return _valid_locales(found, normalize)
 
 
@@ -610,14 +533,16 @@ def assert_equal(a, b, msg=""):
     assert a == b, "%s: %r != %r" % (msg.format(a,b), a, b)
 
 
-def assert_index_equal(left, right):
+def assert_index_equal(left, right, exact=False, check_names=True):
     assert_isinstance(left, Index, '[index] ')
     assert_isinstance(right, Index, '[index] ')
-    if not left.equals(right):
+    if not left.equals(right) or (exact and type(left) != type(right)):
         raise AssertionError("[index] left [{0} {1}], right [{2} {3}]".format(left.dtype,
                                                                               left,
                                                                               right,
                                                                               right.dtype))
+    if check_names:
+        assert_attr_equal('names', left, right)
 
 
 def assert_attr_equal(attr, left, right):
@@ -633,12 +558,117 @@ def isiterable(obj):
 def is_sorted(seq):
     return assert_almost_equal(seq, np.sort(np.array(seq)))
 
+
+def assertIs(first, second, msg=''):
+    """Checks that 'first' is 'second'"""
+    a, b = first, second
+    assert a is b, "%s: %r is not %r" % (msg.format(a, b), a, b)
+
+
+def assertIsNot(first, second, msg=''):
+    """Checks that 'first' is not 'second'"""
+    a, b = first, second
+    assert a is not b, "%s: %r is %r" % (msg.format(a, b), a, b)
+
+
+def assertIn(first, second, msg=''):
+    """Checks that 'first' is in 'second'"""
+    a, b = first, second
+    assert a in b, "%s: %r is not in %r" % (msg.format(a, b), a, b)
+
+
+def assertNotIn(first, second, msg=''):
+    """Checks that 'first' is not in 'second'"""
+    a, b = first, second
+    assert a not in b, "%s: %r is in %r" % (msg.format(a, b), a, b)
+
+
+def assertIsNone(expr, msg=''):
+    """Checks that 'expr' is None"""
+    return assertIs(expr, None, msg)
+
+
+def assertIsNotNone(expr, msg=''):
+    """Checks that 'expr' is not None"""
+    return assertIsNot(expr, None, msg)
+
+
+def assertIsInstance(obj, cls, msg=''):
+    """Test that obj is an instance of cls
+    (which can be a class or a tuple of classes,
+    as supported by isinstance())."""
+    assert isinstance(obj, cls), (
+        "%sExpected object to be of type %r, found %r instead" % (
+            msg, cls, type(obj)))
+
+
+def assertNotIsInstance(obj, cls, msg=''):
+    """Test that obj is not an instance of cls
+    (which can be a class or a tuple of classes,
+    as supported by isinstance())."""
+    assert not isinstance(obj, cls), (
+        "%sExpected object to be of type %r, found %r instead" % (
+            msg, cls, type(obj)))
+
+
+def assert_categorical_equal(res, exp):
+
+    if not array_equivalent(res.categories, exp.categories):
+        raise AssertionError(
+            'categories not equivalent: {0} vs {1}.'.format(res.categories,
+                                                            exp.categories))
+    if not array_equivalent(res.codes, exp.codes):
+        raise AssertionError(
+            'codes not equivalent: {0} vs {1}.'.format(res.codes, exp.codes))
+
+    if res.ordered != exp.ordered:
+        raise AssertionError("ordered not the same")
+
+    if res.name != exp.name:
+        raise AssertionError("name not the same")
+
+
+def assert_numpy_array_equal(np_array, assert_equal):
+    """Checks that 'np_array' is equal to 'assert_equal'
+
+    Note that the expected array should not contain `np.nan`!
+    Two numpy arrays are equal if all
+    elements are equal, which is not possible if `np.nan` is such an element!
+
+    If the expected array includes `np.nan` use
+    `assert_numpy_array_equivalent(...)`.
+    """
+    if np.array_equal(np_array, assert_equal):
+        return
+    raise AssertionError(
+        '{0} is not equal to {1}.'.format(np_array, assert_equal))
+
+
+def assert_numpy_array_equivalent(np_array, assert_equal, strict_nan=False):
+    """Checks that 'np_array' is equivalent to 'assert_equal'
+
+    Two numpy arrays are equivalent if the arrays have equal non-NaN elements,
+     and `np.nan` in corresponding locations.
+
+    If the the expected array does not contain `np.nan`
+    `assert_numpy_array_equivalent` is the similar to
+    `assert_numpy_array_equal()`. If the expected array includes
+    `np.nan` use this
+    function.
+    """
+    if array_equivalent(np_array, assert_equal, strict_nan=strict_nan):
+        return
+    raise AssertionError(
+        '{0} is not equivalent to {1}.'.format(np_array, assert_equal))
+
+
 # This could be refactored to use the NDFrame.equals method
 def assert_series_equal(left, right, check_dtype=True,
                         check_index_type=False,
                         check_series_type=False,
                         check_less_precise=False,
-                        check_exact=False):
+                        check_exact=False,
+                        check_names=True):
     if check_series_type:
         assert_isinstance(left, type(right))
     if check_dtype:
@@ -653,7 +683,7 @@ def assert_series_equal(left, right, check_dtype=True,
         assert_almost_equal(
             left.index.values, right.index.values, check_less_precise)
     else:
-        assert_index_equal(left.index, right.index)
+        assert_index_equal(left.index, right.index, check_names=check_names)
     if check_index_type:
         for level in range(left.index.nlevels):
             lindex = left.index.get_level_values(level)
@@ -661,6 +691,7 @@ def assert_series_equal(left, right, check_dtype=True,
             assert_isinstance(lindex, type(rindex))
             assert_attr_equal('dtype', lindex, rindex)
             assert_attr_equal('inferred_type', lindex, rindex)
+
 
 # This could be refactored to use the NDFrame.equals method
 def assert_frame_equal(left, right, check_dtype=True,
@@ -682,8 +713,7 @@ def assert_frame_equal(left, right, check_dtype=True,
         assert_almost_equal(left.index, right.index)
     else:
         if not by_blocks:
-            assert_index_equal(left.columns, right.columns)
-        assert_index_equal(left.index, right.index)
+            assert_index_equal(left.columns, right.columns, check_names=check_names)
 
     # compare by blocks
     if by_blocks:
@@ -692,7 +722,7 @@ def assert_frame_equal(left, right, check_dtype=True,
         for dtype in list(set(list(lblocks.keys()) + list(rblocks.keys()))):
             assert dtype in lblocks
             assert dtype in rblocks
-            assert_frame_equal(lblocks[dtype],rblocks[dtype],check_dtype=check_dtype)
+            assert_frame_equal(lblocks[dtype],rblocks[dtype], check_dtype=check_dtype)
 
     # compare by columns
     else:
@@ -704,7 +734,8 @@ def assert_frame_equal(left, right, check_dtype=True,
                                 check_dtype=check_dtype,
                                 check_index_type=check_index_type,
                                 check_less_precise=check_less_precise,
-                                check_exact=check_exact)
+                                check_exact=check_exact,
+                                check_names=check_names)
 
     if check_index_type:
         for level in range(left.index.nlevels):
@@ -725,14 +756,15 @@ def assert_frame_equal(left, right, check_dtype=True,
 def assert_panelnd_equal(left, right,
                          check_panel_type=False,
                          check_less_precise=False,
-                         assert_func=assert_frame_equal):
+                         assert_func=assert_frame_equal,
+                         check_names=False):
     if check_panel_type:
         assert_isinstance(left, type(right))
 
     for axis in ['items', 'major_axis', 'minor_axis']:
         left_ind = getattr(left, axis)
         right_ind = getattr(right, axis)
-        assert_index_equal(left_ind, right_ind)
+        assert_index_equal(left_ind, right_ind, check_names=check_names)
 
     for i, item in enumerate(left._get_axis(0)):
         assert item in right, "non-matching item (right) '%s'" % item
@@ -783,6 +815,11 @@ def makeStringIndex(k=10):
 
 def makeUnicodeIndex(k=10):
     return Index(randu_array(nchars=10, size=k))
+
+def makeCategoricalIndex(k=10, n=3):
+    """ make a length k index or n categories """
+    x = rands_array(nchars=4, size=n)
+    return CategoricalIndex(np.random.choice(x,k))
 
 def makeBoolIndex(k=10):
     if k == 1:
@@ -928,7 +965,7 @@ def makeCustomIndex(nentries, nlevels, prefix='#', names=False, ndupe_l=None,
 
     if ndupe_l is None:
         ndupe_l = [1] * nlevels
-    assert (_is_sequence(ndupe_l) and len(ndupe_l) <= nlevels)
+    assert (is_sequence(ndupe_l) and len(ndupe_l) <= nlevels)
     assert (names is None or names is False
             or names is True or len(names) is nlevels)
     assert idx_type is None or \
@@ -1273,6 +1310,7 @@ _network_error_messages = (
 # or this e.errno/e.reason.errno
 _network_errno_vals = (
     101, # Network is unreachable
+    111, # Connection refused
     110, # Connection timed out
     104, # Connection reset Error
     54,  # Connection reset by peer
@@ -1619,7 +1657,7 @@ class _AssertRaisesContextmanager(object):
 
 
 @contextmanager
-def assert_produces_warning(expected_warning=Warning, filter_level="always"):
+def assert_produces_warning(expected_warning=Warning, filter_level="always", clear=None):
     """
     Context manager for running code that expects to raise (or not raise)
     warnings.  Checks that code raises the expected warning and only the
@@ -1646,6 +1684,19 @@ def assert_produces_warning(expected_warning=Warning, filter_level="always"):
     ..warn:: This is *not* thread-safe.
     """
     with warnings.catch_warnings(record=True) as w:
+
+        if clear is not None:
+            # make sure that we are clearning these warnings
+            # if they have happened before
+            # to guarantee that we will catch them
+            if not is_list_like(clear):
+                clear = [ clear ]
+            for m in clear:
+                try:
+                    m.__warningregistry__.clear()
+                except:
+                    pass
+
         saw_warning = False
         warnings.simplefilter(filter_level)
         yield w
@@ -1725,3 +1776,9 @@ def use_numexpr(use, min_elements=expr._MIN_ELEMENTS):
     yield
     expr._MIN_ELEMENTS = oldmin
     expr.set_use_numexpr(olduse)
+
+
+# Also provide all assert_* functions in the TestCase class
+for name, obj in inspect.getmembers(sys.modules[__name__]):
+    if inspect.isfunction(obj) and name.startswith('assert'):
+        setattr(TestCase, name, staticmethod(obj))

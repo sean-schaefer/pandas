@@ -1,8 +1,9 @@
-
+# -*- coding: utf-8 -*-
 import warnings
 
 import nose
 
+import sys
 import pandas.util
 from pandas.util.decorators import deprecate_kwarg
 import pandas.util.testing as tm
@@ -59,6 +60,33 @@ class TestDecorators(tm.TestCase):
             def f4(new=None):
                 pass
 
+
+class TestTesting(tm.TestCase):
+
+    def test_warning(self):
+
+        with tm.assert_produces_warning(FutureWarning):
+            self.assertEquals(1, 1)
+
+        with tm.assert_produces_warning(FutureWarning):
+            self.assertNotEquals(1, 2)
+
+        with tm.assert_produces_warning(FutureWarning):
+            self.assert_(True)
+
+        with tm.assert_produces_warning(FutureWarning):
+            self.assertAlmostEquals(1.0, 1.0000000001)
+
+        with tm.assert_produces_warning(FutureWarning):
+            self.assertNotAlmostEquals(1, 2)
+
+    def test_locale(self):
+        if sys.platform == 'win32':
+            raise nose.SkipTest("skipping on win platforms as locale not available")
+
+        #GH9744
+        locales = pandas.util.testing.get_locales()
+        self.assertTrue(len(locales) >= 1)
 
 def test_rands():
     r = tm.rands(10)

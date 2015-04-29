@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # pylint: disable=W0612,E1101
 
 from datetime import datetime
@@ -9,6 +10,7 @@ import numpy as np
 
 from pandas import Series, DataFrame, Index, isnull, notnull, pivot, MultiIndex
 from pandas.core.datetools import bday
+from pandas.core.nanops import nanall, nanany
 from pandas.core.panel import Panel
 from pandas.core.series import remove_na
 import pandas.core.common as com
@@ -507,7 +509,9 @@ class CheckIndexing(object):
         idx = self.panel.major_axis[5]
         xs = self.panel.major_xs(idx)
 
-        assert_series_equal(xs['ItemA'], ref.xs(idx))
+        result = xs['ItemA']
+        assert_series_equal(result, ref.xs(idx), check_names=False)
+        self.assertEqual(result.name, 'ItemA')
 
         # not contained
         idx = self.panel.major_axis[0] - bday
@@ -525,7 +529,7 @@ class CheckIndexing(object):
         idx = self.panel.minor_axis[1]
         xs = self.panel.minor_xs(idx)
 
-        assert_series_equal(xs['ItemA'], ref[idx])
+        assert_series_equal(xs['ItemA'], ref[idx], check_names=False)
 
         # not contained
         self.assertRaises(Exception, self.panel.minor_xs, 'E')
@@ -656,7 +660,7 @@ class CheckIndexing(object):
 
     def test_ix_align(self):
         from pandas import Series
-        b = Series(np.random.randn(10))
+        b = Series(np.random.randn(10), name=0)
         b.sort()
         df_orig = Panel(np.random.randn(3, 10, 2))
         df = df_orig.copy()
@@ -885,6 +889,21 @@ class TestPanel(tm.TestCase, PanelTests, CheckIndexing,
         # copy
         wp = Panel(vals, copy=True)
         self.assertIsNot(wp.values, vals)
+
+        # GH #8285, test when scalar data is used to construct a Panel
+        # if dtype is not passed, it should be inferred
+        value_and_dtype = [(1, 'int64'), (3.14, 'float64'), ('foo', np.object_)]
+        for (val, dtype) in value_and_dtype:
+            wp = Panel(val, items=range(2), major_axis=range(3), minor_axis=range(4))
+            vals = np.empty((2, 3, 4), dtype=dtype)
+            vals.fill(val)
+            assert_panel_equal(wp, Panel(vals, dtype=dtype))
+
+        # test the case when dtype is passed
+        wp = Panel(1, items=range(2), major_axis=range(3), minor_axis=range(4), dtype='float32')
+        vals = np.empty((2, 3, 4), dtype='float32')
+        vals.fill(1)
+        assert_panel_equal(wp, Panel(vals, dtype='float32'))
 
     def test_constructor_cast(self):
         zero_filled = self.panel.fillna(0)
@@ -1679,22 +1698,23 @@ class TestPanel(tm.TestCase, PanelTests, CheckIndexing,
         # major
         idx = self.panel.major_axis[0]
         idx_lag = self.panel.major_axis[1]
-
         shifted = self.panel.shift(1)
-
         assert_frame_equal(self.panel.major_xs(idx),
                            shifted.major_xs(idx_lag))
 
         # minor
         idx = self.panel.minor_axis[0]
         idx_lag = self.panel.minor_axis[1]
-
         shifted = self.panel.shift(1, axis='minor')
-
         assert_frame_equal(self.panel.minor_xs(idx),
                            shifted.minor_xs(idx_lag))
 
-        self.assertRaises(Exception, self.panel.shift, 1, axis='items')
+        # items
+        idx = self.panel.items[0]
+        idx_lag = self.panel.items[1]
+        shifted = self.panel.shift(1, axis='items')
+        assert_frame_equal(self.panel[idx],
+                           shifted[idx_lag])
 
         # negative numbers, #2164
         result = self.panel.shift(-1)
@@ -1967,6 +1987,15 @@ class TestPanel(tm.TestCase, PanelTests, CheckIndexing,
         expected = Panel({"One": df})
         check_drop('Two', 0, ['items'], expected)
 
+        self.assertRaises(ValueError, panel.drop, 'Three')
+
+        # errors = 'ignore'
+        dropped = panel.drop('Three', errors='ignore')
+        assert_panel_equal(dropped, panel)
+        dropped = panel.drop(['Two', 'Three'], errors='ignore')
+        expected = Panel({"One": df})
+        assert_panel_equal(dropped, expected)
+
         # Major
         exp_df = DataFrame({"A": [2], "B": [4]}, index=[1])
         expected = Panel({"One": exp_df, "Two": exp_df})
@@ -2101,6 +2130,24 @@ class TestPanel(tm.TestCase, PanelTests, CheckIndexing,
 
         np.testing.assert_raises(Exception, pan.update, *(pan,),
                                  **{'raise_conflict': True})
+
+    def test_all_any(self):
+        self.assertTrue((self.panel.all(axis=0).values ==
+                         nanall(self.panel, axis=0)).all())
+        self.assertTrue((self.panel.all(axis=1).values ==
+                         nanall(self.panel, axis=1).T).all())
+        self.assertTrue((self.panel.all(axis=2).values ==
+                         nanall(self.panel, axis=2).T).all())
+        self.assertTrue((self.panel.any(axis=0).values ==
+                         nanany(self.panel, axis=0)).all())
+        self.assertTrue((self.panel.any(axis=1).values ==
+                         nanany(self.panel, axis=1).T).all())
+        self.assertTrue((self.panel.any(axis=2).values ==
+                         nanany(self.panel, axis=2).T).all())
+
+    def test_all_any_unhandled(self):
+        self.assertRaises(NotImplementedError, self.panel.all, bool_only=True)
+        self.assertRaises(NotImplementedError, self.panel.any, bool_only=True)
 
 
 class TestLongPanel(tm.TestCase):

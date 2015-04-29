@@ -250,9 +250,9 @@ Attributes
    Series.dtype
    Series.ftype
    Series.shape
-   Series.size
    Series.nbytes
    Series.ndim
+   Series.size
    Series.strides
    Series.itemsize
    Series.base
@@ -394,6 +394,8 @@ Reindexing / Selection / Label manipulation
    Series.take
    Series.tail
    Series.truncate
+   Series.where
+   Series.mask
 
 Missing data handling
 ~~~~~~~~~~~~~~~~~~~~~
@@ -447,116 +449,127 @@ Datetimelike Properties
 
 ``Series.dt`` can be used to access the values of the series as
 datetimelike and return several properties.
-Due to implementation details the methods show up here as methods of the
-``DatetimeProperties/PeriodProperties/TimedeltaProperties`` classes. These can be accessed like ``Series.dt.<property>``.
-
-.. currentmodule:: pandas.tseries.common
+These can be accessed like ``Series.dt.<property>``.
 
 **Datetime Properties**
 
 .. autosummary::
    :toctree: generated/
+   :template: autosummary/accessor_attribute.rst
 
-   DatetimeProperties.date
-   DatetimeProperties.time
-   DatetimeProperties.year
-   DatetimeProperties.month
-   DatetimeProperties.day
-   DatetimeProperties.hour
-   DatetimeProperties.minute
-   DatetimeProperties.second
-   DatetimeProperties.microsecond
-   DatetimeProperties.nanosecond
-   DatetimeProperties.second
-   DatetimeProperties.weekofyear
-   DatetimeProperties.dayofweek
-   DatetimeProperties.weekday
-   DatetimeProperties.dayofyear
-   DatetimeProperties.quarter
-   DatetimeProperties.is_month_start
-   DatetimeProperties.is_month_end
-   DatetimeProperties.is_quarter_start
-   DatetimeProperties.is_quarter_end
-   DatetimeProperties.is_year_start
-   DatetimeProperties.is_year_end
+   Series.dt.date
+   Series.dt.time
+   Series.dt.year
+   Series.dt.month
+   Series.dt.day
+   Series.dt.hour
+   Series.dt.minute
+   Series.dt.second
+   Series.dt.microsecond
+   Series.dt.nanosecond
+   Series.dt.second
+   Series.dt.weekofyear
+   Series.dt.dayofweek
+   Series.dt.weekday
+   Series.dt.dayofyear
+   Series.dt.quarter
+   Series.dt.is_month_start
+   Series.dt.is_month_end
+   Series.dt.is_quarter_start
+   Series.dt.is_quarter_end
+   Series.dt.is_year_start
+   Series.dt.is_year_end
 
 **Datetime Methods**
 
 .. autosummary::
    :toctree: generated/
+   :template: autosummary/accessor_method.rst
 
-   DatetimeProperties.to_period
-   DatetimeProperties.to_pydatetime
-   DatetimeProperties.tz_localize
-   DatetimeProperties.tz_convert
+   Series.dt.to_period
+   Series.dt.to_pydatetime
+   Series.dt.tz_localize
+   Series.dt.tz_convert
 
 **Timedelta Properties**
 
 .. autosummary::
    :toctree: generated/
+   :template: autosummary/accessor_attribute.rst
 
-   TimedeltaProperties.days
-   TimedeltaProperties.hours
-   TimedeltaProperties.minutes
-   TimedeltaProperties.seconds
-   TimedeltaProperties.milliseconds
-   TimedeltaProperties.microseconds
-   TimedeltaProperties.nanoseconds
-   TimedeltaProperties.components
+   Series.dt.days
+   Series.dt.seconds
+   Series.dt.microseconds
+   Series.dt.nanoseconds
+   Series.dt.components
 
 **Timedelta Methods**
 
 .. autosummary::
    :toctree: generated/
+   :template: autosummary/accessor_method.rst
 
-   TimedeltaProperties.to_pytimedelta
+   Series.dt.to_pytimedelta
 
 String handling
 ~~~~~~~~~~~~~~~
 ``Series.str`` can be used to access the values of the series as
-strings and apply several methods to it. Due to implementation
-details the methods show up here as methods of the
-``StringMethods`` class. These can be acccessed like ``Series.str.<function/property>``.
-
-.. currentmodule:: pandas.core.strings
+strings and apply several methods to it. These can be acccessed like
+``Series.str.<function/property>``.
 
 .. autosummary::
    :toctree: generated/
+   :template: autosummary/accessor_method.rst
 
-   StringMethods.cat
-   StringMethods.center
-   StringMethods.contains
-   StringMethods.count
-   StringMethods.decode
-   StringMethods.encode
-   StringMethods.endswith
-   StringMethods.extract
-   StringMethods.findall
-   StringMethods.get
-   StringMethods.join
-   StringMethods.len
-   StringMethods.lower
-   StringMethods.lstrip
-   StringMethods.match
-   StringMethods.pad
-   StringMethods.repeat
-   StringMethods.replace
-   StringMethods.rstrip
-   StringMethods.slice
-   StringMethods.slice_replace
-   StringMethods.split
-   StringMethods.startswith
-   StringMethods.strip
-   StringMethods.title
-   StringMethods.upper
-   StringMethods.get_dummies
+   Series.str.capitalize
+   Series.str.cat
+   Series.str.center
+   Series.str.contains
+   Series.str.count
+   Series.str.decode
+   Series.str.encode
+   Series.str.endswith
+   Series.str.extract
+   Series.str.find
+   Series.str.findall
+   Series.str.get
+   Series.str.join
+   Series.str.len
+   Series.str.ljust
+   Series.str.lower
+   Series.str.lstrip
+   Series.str.match
+   Series.str.pad
+   Series.str.repeat
+   Series.str.replace
+   Series.str.rfind
+   Series.str.rjust
+   Series.str.rstrip
+   Series.str.slice
+   Series.str.slice_replace
+   Series.str.split
+   Series.str.startswith
+   Series.str.strip
+   Series.str.swapcase
+   Series.str.title
+   Series.str.upper
+   Series.str.wrap
+   Series.str.zfill
+   Series.str.isalnum
+   Series.str.isalpha
+   Series.str.isdigit
+   Series.str.isspace
+   Series.str.islower
+   Series.str.isupper
+   Series.str.istitle
+   Series.str.isnumeric
+   Series.str.isdecimal
+   Series.str.get_dummies
 
 .. _api.categorical:
 
 Categorical
 ~~~~~~~~~~~
-
-.. currentmodule:: pandas.core.categorical
 
 If the Series is of dtype ``category``, ``Series.cat`` can be used to change the the categorical
 data. This accessor is similar to the ``Series.dt`` or ``Series.str`` and has the
@@ -573,6 +586,8 @@ following usable methods and properties (all available as ``Series.cat.<method_o
    Categorical.remove_categories
    Categorical.remove_unused_categories
    Categorical.set_categories
+   Categorical.as_ordered
+   Categorical.as_unordered
    Categorical.codes
 
 To create a Series of dtype ``category``, use ``cat = s.astype("category")``.
@@ -596,7 +611,6 @@ the Categorical back to a numpy array, so levels and order information is not pr
 
 Plotting
 ~~~~~~~~
-.. currentmodule:: pandas
 
 .. autosummary::
    :toctree: generated/
@@ -622,6 +636,14 @@ Serialization / IO / Conversion
    Series.to_dense
    Series.to_string
    Series.to_clipboard
+
+Sparse methods
+~~~~~~~~~~~~~~
+.. autosummary::
+   :toctree: generated/
+
+   SparseSeries.to_coo
+   SparseSeries.from_coo
 
 .. _api.dataframe:
 
@@ -654,6 +676,7 @@ Attributes and underlying data
    DataFrame.values
    DataFrame.axes
    DataFrame.ndim
+   DataFrame.size
    DataFrame.shape
 
 Conversion
@@ -688,6 +711,8 @@ Indexing, iteration
    DataFrame.tail
    DataFrame.xs
    DataFrame.isin
+   DataFrame.where
+   DataFrame.mask
    DataFrame.query
 
 For more information on ``.at``, ``.iat``, ``.ix``, ``.loc``, and
@@ -839,6 +864,7 @@ Combining / joining / merging
    :toctree: generated/
 
    DataFrame.append
+   DataFrame.assign
    DataFrame.join
    DataFrame.merge
    DataFrame.update
@@ -921,6 +947,7 @@ Attributes and underlying data
    Panel.values
    Panel.axes
    Panel.ndim
+   Panel.size
    Panel.shape
    Panel.dtypes
    Panel.ftypes
@@ -1128,6 +1155,7 @@ Attributes and underlying data
    Panel4D.values
    Panel4D.axes
    Panel4D.ndim
+   Panel4D.size
    Panel4D.shape
    Panel4D.dtypes
    Panel4D.ftypes
@@ -1169,13 +1197,14 @@ Attributes
    Index.is_monotonic_increasing
    Index.is_monotonic_decreasing
    Index.is_unique
+   Index.has_duplicates
    Index.dtype
    Index.inferred_type
    Index.is_all_dates
    Index.shape
-   Index.size
    Index.nbytes
    Index.ndim
+   Index.size
    Index.strides
    Index.itemsize
    Index.base
@@ -1262,6 +1291,34 @@ Selecting
    Index.isin
    Index.slice_indexer
    Index.slice_locs
+
+.. _api.categoricalindex:
+
+CategoricalIndex
+----------------
+
+.. autosummary::
+   :toctree: generated/
+
+   CategoricalIndex
+
+Categorical Components
+~~~~~~~~~~~~~~~~~~~~~~
+
+.. autosummary::
+   :toctree: generated/
+
+   CategoricalIndex.codes
+   CategoricalIndex.categories
+   CategoricalIndex.ordered
+   CategoricalIndex.rename_categories
+   CategoricalIndex.reorder_categories
+   CategoricalIndex.add_categories
+   CategoricalIndex.remove_categories
+   CategoricalIndex.remove_unused_categories
+   CategoricalIndex.set_categories
+   CategoricalIndex.as_ordered
+   CategoricalIndex.as_unordered
 
 .. _api.datetimeindex:
 
@@ -1350,10 +1407,7 @@ Components
    :toctree: generated/
 
    TimedeltaIndex.days
-   TimedeltaIndex.hours
-   TimedeltaIndex.minutes
    TimedeltaIndex.seconds
-   TimedeltaIndex.milliseconds
    TimedeltaIndex.microseconds
    TimedeltaIndex.nanoseconds
    TimedeltaIndex.components
@@ -1496,230 +1550,3 @@ Working with options
    get_option
    set_option
    option_context
-
-
-..
-    HACK - see github issue #4539. To ensure old links remain valid, include
-    here the autosummaries with previous currentmodules as a comment and add
-    them to a hidden toctree (to avoid warnings):
-
-.. toctree::
-   :hidden:
-
-   generated/pandas.core.common.isnull
-   generated/pandas.core.common.notnull
-   generated/pandas.core.reshape.get_dummies
-   generated/pandas.io.clipboard.read_clipboard
-   generated/pandas.io.excel.ExcelFile.parse
-   generated/pandas.io.excel.read_excel
-   generated/pandas.io.html.read_html
-   generated/pandas.io.json.read_json
-   generated/pandas.io.parsers.read_csv
-   generated/pandas.io.parsers.read_fwf
-   generated/pandas.io.parsers.read_table
-   generated/pandas.io.pickle.read_pickle
-   generated/pandas.io.pytables.HDFStore.append
-   generated/pandas.io.pytables.HDFStore.get
-   generated/pandas.io.pytables.HDFStore.put
-   generated/pandas.io.pytables.HDFStore.select
-   generated/pandas.io.pytables.read_hdf
-   generated/pandas.io.sql.read_sql
-   generated/pandas.io.sql.read_frame
-   generated/pandas.io.sql.write_frame
-   generated/pandas.io.stata.read_stata
-   generated/pandas.stats.moments.ewma
-   generated/pandas.stats.moments.ewmcorr
-   generated/pandas.stats.moments.ewmcov
-   generated/pandas.stats.moments.ewmstd
-   generated/pandas.stats.moments.ewmvar
-   generated/pandas.stats.moments.expanding_apply
-   generated/pandas.stats.moments.expanding_corr
-   generated/pandas.stats.moments.expanding_count
-   generated/pandas.stats.moments.expanding_cov
-   generated/pandas.stats.moments.expanding_kurt
-   generated/pandas.stats.moments.expanding_mean
-   generated/pandas.stats.moments.expanding_median
-   generated/pandas.stats.moments.expanding_quantile
-   generated/pandas.stats.moments.expanding_skew
-   generated/pandas.stats.moments.expanding_std
-   generated/pandas.stats.moments.expanding_sum
-   generated/pandas.stats.moments.expanding_var
-   generated/pandas.stats.moments.rolling_apply
-   generated/pandas.stats.moments.rolling_corr
-   generated/pandas.stats.moments.rolling_count
-   generated/pandas.stats.moments.rolling_cov
-   generated/pandas.stats.moments.rolling_kurt
-   generated/pandas.stats.moments.rolling_mean
-   generated/pandas.stats.moments.rolling_median
-   generated/pandas.stats.moments.rolling_quantile
-   generated/pandas.stats.moments.rolling_skew
-   generated/pandas.stats.moments.rolling_std
-   generated/pandas.stats.moments.rolling_sum
-   generated/pandas.stats.moments.rolling_var
-   generated/pandas.tools.merge.concat
-   generated/pandas.tools.merge.merge
-   generated/pandas.tools.pivot.pivot_table
-   generated/pandas.tseries.tools.to_datetime
-
-..
-    .. currentmodule:: pandas.io.pickle
-
-    .. autosummary::
-       :toctree: generated/
-
-       read_pickle
-
-    .. currentmodule:: pandas.io.parsers
-
-    .. autosummary::
-       :toctree: generated/
-
-       read_table
-       read_csv
-       read_fwf
-
-    .. currentmodule:: pandas.io.clipboard
-
-    .. autosummary::
-       :toctree: generated/
-
-       read_clipboard
-
-    .. currentmodule:: pandas.io.excel
-
-    .. autosummary::
-       :toctree: generated/
-
-       read_excel
-       ExcelFile.parse
-
-    .. currentmodule:: pandas.io.json
-
-    .. autosummary::
-       :toctree: generated/
-
-       read_json
-
-    .. currentmodule:: pandas.io.html
-
-    .. autosummary::
-       :toctree: generated/
-
-       read_html
-
-    .. currentmodule:: pandas.io.pytables
-
-    .. autosummary::
-       :toctree: generated/
-
-       read_hdf
-       HDFStore.put
-       HDFStore.append
-       HDFStore.get
-       HDFStore.select
-
-    .. currentmodule:: pandas.io.sql
-
-    .. autosummary::
-       :toctree: generated/
-
-       read_sql
-       read_frame
-       write_frame
-
-    .. currentmodule:: pandas.io.stata
-
-    .. autosummary::
-       :toctree: generated/
-
-       read_stata
-       StataReader.data
-       StataReader.data_label
-       StataReader.value_labels
-       StataReader.variable_labels
-       StataWriter.write_file
-
-    .. currentmodule:: pandas.tools.pivot
-
-    .. autosummary::
-       :toctree: generated/
-
-       pivot_table
-
-    .. currentmodule:: pandas.tools.merge
-
-    .. autosummary::
-       :toctree: generated/
-
-       merge
-       concat
-
-    .. currentmodule:: pandas.core.reshape
-
-    .. autosummary::
-       :toctree: generated/
-
-       get_dummies
-
-    .. currentmodule:: pandas.core.common
-
-    .. autosummary::
-       :toctree: generated/
-
-       isnull
-       notnull
-
-    .. currentmodule:: pandas.tseries.tools
-
-    .. autosummary::
-       :toctree: generated/
-
-       to_datetime
-
-
-    .. currentmodule:: pandas.stats.moments
-
-    .. autosummary::
-       :toctree: generated/
-
-       rolling_count
-       rolling_sum
-       rolling_mean
-       rolling_median
-       rolling_var
-       rolling_std
-       rolling_corr
-       rolling_cov
-       rolling_skew
-       rolling_kurt
-       rolling_apply
-       rolling_quantile
-
-
-    .. currentmodule:: pandas.stats.moments
-
-    .. autosummary::
-       :toctree: generated/
-
-       expanding_count
-       expanding_sum
-       expanding_mean
-       expanding_median
-       expanding_var
-       expanding_std
-       expanding_corr
-       expanding_cov
-       expanding_skew
-       expanding_kurt
-       expanding_apply
-       expanding_quantile
-
-
-    .. autosummary::
-       :toctree: generated/
-
-       ewma
-       ewmstd
-       ewmvar
-       ewmcorr
-       ewmcov
